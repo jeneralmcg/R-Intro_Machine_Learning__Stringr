@@ -1,0 +1,349 @@
+---
+title: "Lab 5"
+author: "Jen McGregor"
+date: "10/20/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(stringr)
+library(strex)
+library(tidyverse)
+```
+
+# Part One: General R Questions [50 points]
+
+#### 1. In Week 1, you were asked to consider the relationship between private companies and open-source community. In a short paragraph (3-5 sentences), share your thoughts on this topic as it relates to R, RStudio, and the R community.
+
+What differentiates R from other online programs is its status as being open-source, meaning that it is created by, and for, the community at large. With this comes user-designed packages that enhance R's programming capabilities and are regularly updated. R Studio, itself, was designed as a platform to enhance the usability of the R programming language. Physical communities are also readily available for any R-related questions on platforms such as Twitter.  
+
+#### 2. Suppose I create an object with the following (see below). Which of the following is an accurate statement about a? Check all that apply.
+                      
+```{r,results=FALSE,error=TRUE, error=TRUE}
+a <- 10
+str(a)
+```
+
+- **a is an atomic vector.**
+  
+- **a is a numeric vector.**
+  
+- a has the object class integer.
+  
+- **length(a) is equal to 1.**
+  
+- a + c(1,4,7) will give an error.
+  
+- **as.character(a) will return "10"**
+
+#### 3. Consider the following output. What object structure is mystery_object? Check all that apply
+
+```{r,results=FALSE,error=TRUE, error=TRUE}
+str(mystery_object)
+##  num [1:3, 1:4] -0.1892 0.0798 -0.6034 -1.0793 0.743 ...
+```
+
+
+- An atomic vector
+
+- A vector
+
+- **A matrix**
+
+- A data frame
+
+- A list
+
+```{r,results=FALSE,error=TRUE, error=TRUE}
+#test matrix format
+matrix <- matrix(1:9, nrow = 3, ncol = 3)
+str(matrix)
+```
+
+#### 4. Suppose student_names is a character vector containing the names of students in a particular class. For example, one entry of student names might be Brad Pitt, and another might be Jeffrey Armstrong. You may assume there are no middle names or two-word first or last names.
+
+#### What object will be returned by `str_extract(")
+
+A character vector will be returned by str_extract.
+
+#### Which of the following will return the full names of students whose first name starts with a K? Check all that apply.
+
+```{r}
+# test student names
+student_names <- c("Kevin jonas", "Kyle massey", "Kendrick lamar", "junie b jones")
+
+str_extract(student_names, "^K")
+str_extract(student_names, "^K.*")
+str_extract(student_names, "^K[a-z]*")
+str_extract(student_names, "K[a-z]* ")
+str_subset(student_names, "^K")
+str_subset(student_names, "^K.*")
+str_subset(student_names, "^K[a-z]*")
+str_subset(student_names, "K[a-z]* ")
+```
+
+- str_extract(student_names, "^K.*")
+
+- str_subset(student_names, "^K")
+
+- str_subset(student_names, "^K.*")
+
+- str_subset(student_names, "^K[a-z]*")
+
+- str_subset(student_names, "K[a-z]* ")
+
+#### 5. Consider the following function. What would be the most reasonable code to put in the #?????? part?
+
+```{r,results=FALSE,error=TRUE, error=TRUE}
+vectorify <- function(x) {
+  
+  if (length(x) == 1) {
+    
+    x <- rep(x, 10)
+    
+  } else {
+    
+    #???????
+    
+  }
+  
+  return(x)
+  
+}
+```
+
+- return(x)
+
+- return(x[1:10])
+
+- **return("x must be length 1")**
+
+- print("x must be length 1")
+
+- stop("x must be length 1")
+
+- length(x) <- 1
+
+- x <- x + 1:10
+
+# Part Two: Write Functions [100 points]
+
+#### Consider the following example vector, consisting of numbers and also “footnotes” of letters in parentheses. Suppose we would like to process this vector into three separate vectors: the first number, the second number, and the footnotes.
+
+```{r, results=FALSE,error=TRUE, error=TRUE}
+vec <- c("1.01 - 1.02 (b)", "4.24 - 6.7 (c,b)", "1.5 (a) - 2.4 (d-f)")
+```
+
+
+#### 1. Write a function called get_footnotes that returns the footnotes as a list of string vectors, for example:
+```{r, results=FALSE,error=TRUE, error=TRUE}
+get_footnotes(vec)
+## [[1]]
+## [1] "(b)"
+## 
+## [[2]]
+## [1] "(c,b)"
+## 
+## [[3]]
+## [1] "(a)"   "(d-f)"
+```
+
+
+```{r}
+get_footnotes <- function(x) {
+  str_extract_all(x,"\\([^()]+\\)")
+  }
+get_footnotes(vec)
+```
+
+#### 2. Write a function called get_nums that returns the first and last numbers as a data frame, for example:
+
+```{r, results=FALSE,error=TRUE, error=TRUE}
+get_nums(vec)
+## # A tibble: 3 x 2
+##   First.Num Last.Num
+##       <dbl>    <dbl>
+## 1      1.01     1.02
+## 2      4.24     6.7 
+## 3      1.5      2.4
+```
+
+```{r}
+get_nums <- function(x) {
+  First.Num <- str_extract(x,"[[:digit:]]+\\.*[[:digit:]]*")
+  Last.Num.Draft <- str_extract(x,"-.[[:digit:]]+\\.*[[:digit:]]*")
+  Last.Num <- gsub("- ","",Last.Num.Draft)
+  DF <- tibble(First.Num,Last.Num)
+  head(DF)
+}
+get_nums(vec)
+```
+# Part Three: Short Answer [100 points]
+
+#### 1. How many entries in this dataset had footnote (b)?
+
+```{r, include=FALSE}
+minwage <- read_csv("min_wage.csv")
+minwage <- minwage
+````
+
+```{r}
+length(str_subset(minwage$Footnote,"b"))
+```
+#### 2. Which states had the highest and lowest minimum wage in each year? (Use the High.Value dollar amount, not adjusted for inflation.)
+
+```{r}
+highminwage <- minwage %>%
+  select(Year,State,High.Value) %>%
+  group_by(Year) %>%
+  top_n(1)
+highminwage
+
+lowminwage <- minwage %>%
+  select(Year,State,Low.Value) %>%
+  group_by(Year) %>%
+  summarize(lowvalue=min(Low.Value))
+
+lowminwage <- minwage %>%
+  select(Year,State,Low.Value) %>%
+  group_by(Year) %>%
+  filter(Low.Value==min(Low.Value))
+lowminwage
+````
+
+#### 3. Which states had the largest change in minimum wage (difference between high and low values) in each year?
+
+
+```{r}
+diffwage <- minwage %>%
+  mutate(diffwage=High.Value-Low.Value) %>%
+  select(Year,State,diffwage) %>%
+  group_by(Year) %>%
+  top_n(1)
+diffwage
+```
+
+#### 4. Consider only Texas and California. Make a plot comparing their minimum wage in 2018 dollars (Low.2018) over time:
+
+```{r}
+CA_TX <- minwage %>%
+  filter(State=="California"|State=="Texas") %>%
+  ggplot(aes(x=Year,y=Low.2018,color=State))+
+  geom_line()+
+  labs(title="TX and California Minimum Wage (in 2018 dollars) Over Time")+
+  theme(plot.title = element_text(hjust = 0.5))
+CA_TX
+```
+
+#### 5. Create a new data frame with the following properties:
+
+- Each row should represent a different year of observations.
+
+- Each column should represent one state
+
+- Values should be the highest minimum wage (High.2018) in that state for a particular year
+
+```{r}
+NewDF <- minwage %>%
+  select(State,Year,High.2018) %>%
+  pivot_wider(names_from=State,values_from=High.2018) %>%
+  group_by(Year)
+```
+
+# Part 4: Open-Ended Analysis [150 Points]
+
+### How does minimum wage differ by region?
+
+#### Decide on your own regional grouping for the states. For example, you might consider East vs. West, North vs. South, or something more nuanced. You are welcome to reference any internet source to determine your grouping.
+
+#### Compare the minimum wage between regions to come up with an interesting insight.
+
+#### For example: Did some regions grow faster than others? Do some regions tend to have higher minimum wage than others? etc.
+
+#### Create a writeup of approximately 1 page (including all plots and tables) that tells a clear story. Your writeup must include at least on plot and at least one summary statistic.
+
+Prior to analysis, any location listed outside of the United States (Puerto Rico, U.S. Virgin Islands, Guam, Federal) was originally placed in the "West" region category before being removed for further analysis. District of Columbia was also removed during analysis. 
+
+During data wrangling, a function was created to match each state with its abbreviation for ease of future plot viewing. For evaluation of minimum wages, occurrences where the High.Value equaled zero were removed, as they proved to serve as outliers to the dataset. The remaining states were split into four regions: West, South, Northeast, and Midwest. The following table provides a breakdown into which state belongs to which region:
+
+West  | South    | Northeast  | Midwest
+----- | -------- | ---------- | --------
+AK    |     DE   |      CT    |  IL
+AZ    |     FL   |      ME    |  IN
+CA    |     GA   |      MA    |  MI
+CO    |     MD   |      NH    |  OH
+HI    |     NC   |      RI    |  WI
+ID    |     SC   |      VT    |  IA
+NV    |     VA   |      NJ    |  KS
+NM    |     WV   |      NY    |  MN
+OR    |     AL   |      PA    |  MO
+UT    |     KY   |      --    |  NE
+WA    |     MS   |      --    |  ND
+WY    |     TN   |      --    |  SD
+--    |     AR   |      --    |  --
+--    |     LA   |      --    |  --
+--    |     OK   |      --    |  --
+--    |     TX   |      --    |  --
+
+```{r}
+stateabb <- function(x){
+  state.abb[match(x,state.name)] 
+}
+minwage$stateabbreviation <- stateabb(minwage$State)
+
+
+minwage$Region <- ifelse(minwage$stateabbreviation %in% c("CT","ME","MA","NH","RI","VT","NJ","NY","PA"), "Northeast",
+                       ifelse(minwage$stateabbreviation %in% c("IL","IN","MI","OH","WI","IA","KS","MN","MO","NE","ND","SD"),"Midwest",
+                              ifelse(minwage$stateabbreviation %in% c("DE","FL","GA","MD","NC","SC","VA","WV","AL","KY","MS","TN","AR","LA","OK","TX"),"South",
+                                     "West")))
+```
+
+```{r}
+Region_Insights <- minwage %>%
+  select(Year,stateabbreviation,Region,High.Value) %>%
+  filter(High.Value>0) %>%
+  na.omit(minwage$stateabbreviation)
+Region_Insights$Region <- as.factor(Region_Insights$Region)
+```
+
+Since each region varies in state amounts, average values in High.Value wage were compared. This was to determinie which region, over time, has had the highest wage value. According to the dataframe below, the Northeast region has the highest mean wage value at 4.55, and the South region has the lowest mean wage value at 4.06. 
+
+```{r}
+WestAvgWage <- Region_Insights %>%
+  filter(Region=="West") %>%
+  summarize(West_Mean_Wage=mean(High.Value))
+
+SouthAvgWage <- Region_Insights %>%
+  filter(Region=="South") %>%
+  summarize(South_Mean_Wage=mean(High.Value))
+
+NortheastAvgWage <- Region_Insights %>%
+  filter(Region=="Northeast") %>%
+  summarize(Northeast_Mean_Wage=mean(High.Value))
+
+MidwestAvgWage <- Region_Insights %>%
+  filter(Region=="Midwest") %>%
+  summarize(Midwest_Mean_Wage=mean(High.Value),digits=2)
+
+data.frame(c(WestAvgWage,SouthAvgWage,NortheastAvgWage,MidwestAvgWage))
+```
+
+Finally, a plot was made to compare the change in High.Value wages over time. The plot demonstrates that the four regions gained in High.Value wages at approximately the same rate over time. Additionally, although the West region does not hold the highest average High.Value wage in comparison with other regions, it has at least one state that holds the top spot in High.Wage Value during each year. This may be due to the higher cost of living in western states, among other factors. 
+
+```{r}
+Region_InsightsPlot <- minwage %>%
+  select(Year,stateabbreviation,Region,High.Value) %>%
+  filter(High.Value>0) %>%
+  na.omit(minwage$stateabbreviation) %>%
+  ggplot(aes(x=Year,y=High.Value,color=Region))+
+  geom_point()+
+  labs(title="Minimum Wage Over Time, by U.S. Region")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  ylab("Minimum Wage (in $)")
+  
+Region_InsightsPlot
+```

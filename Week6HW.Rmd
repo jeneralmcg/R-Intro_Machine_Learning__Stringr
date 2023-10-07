@@ -1,0 +1,106 @@
+---
+title: "Week6HW"
+author: "Jen McGregor"
+date: "2/8/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(scales)
+library(ggplot2)
+myData <- bankLoss
+```
+
+# HW 7
+
+I am interested in net losses (Net.Loss) and how they evolve over time and by business (Business) and region (Region). Your analysis should include numerical summaries and data visualizations.
+
+Create presentation (using PowerPoint or whatever you like) for your analysis using the Storytelling with Data principles you have learned thus far (ie no clutter, effective color, using preattentive attributes and visual hierarchies) with appropriate visualizations. Make a (screencast) recording of you going through your results (target time is 2 minutes). Then upload your video to YouTube (as an unlisted video). Create a post with a link to your video.
+
+
+```{r}
+table(myData$Region)
+
+# 1. Yearly Avg Net Losses Per Region
+plot1 <- myData %>%
+  group_by(Region,Year) %>%
+  summarize(mean_net_losses=mean(Net.Loss)) %>%
+  arrange(Year) 
+
+plot1 %>%
+  ggplot(aes(x=Year,y=mean_net_losses,fill=Region)) +
+  geom_col(position="dodge")+
+  ylab("Mean Net Losses")+
+  scale_y_continuous(labels = label_number(suffix = " M", scale = 1e-6))+
+  labs(title="Yearly Average Net Losses per Region")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+# 2. Yearly Net Losses per Region
+plot2 <- myData %>%
+  group_by(Region,Year) %>%
+  summarize(net_losses=sum(Net.Loss)) %>%
+  arrange(Year) 
+ 
+plot2$Year2 = as.Date(plot2$Year, format="%Y") 
+
+plot2 %>%
+  ggplot(aes(x=Year2,y=net_losses,color=Region))+
+  geom_line()+
+  xlab("Year")+
+  ylab("Yearly Net Losses")+
+  scale_y_continuous(labels = label_number(suffix = " M", scale = 1e-6))+
+  labs(title="Yearly Net Losses per Region")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+table(myData$Business)
+?as.Date()
+# 3. Yearly Average Net Losses per Business
+plot3 <- myData %>%
+  group_by(Business,Year) %>%
+  summarize(mean_net_losses=mean(Net.Loss)) %>%
+  arrange(Year) 
+
+plot3 %>%
+  ggplot(aes(x=Year,y=mean_net_losses,fill=Business)) +
+  geom_col(position="dodge")+
+  ylab("Mean Net Losses")+
+  scale_y_continuous(labels = label_number(suffix = " M", scale = 1e-6))+
+  labs(title="Yearly Average Net Losses per Business")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+# 4. Avg Net Losses Per Business, without Corporate Finance
+plot4 <- myData %>%
+  group_by(Business,Year) %>%
+  summarize(mean_net_losses=mean(Net.Loss)) %>%
+  arrange(Year)
+
+  ####remove corporate finance to get better view of plot
+plot4 <- plot4[- grep("Corporate Finance", plot4$Business),]
+plot4 %>%
+  ggplot(aes(x=Year,y=mean_net_losses,fill=Business)) +
+  geom_col(position="dodge")+
+  ylab("Mean Net Losses")+
+  scale_y_continuous(labels = label_number(suffix = " M", scale = 1e-6))+
+  labs(title="Yearly Average Net Losses per Business: Without Corporate Finance")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+# 5. Yearly Net Losses per Business
+plot5 <- myData %>%
+  group_by(Business,Year) %>%
+  summarize(net_losses=sum(Net.Loss)) %>%
+  arrange(Year) 
+
+plot5$Year2 = as.Date(plot5$Year, format="%Y") 
+
+plot5 %>%
+  ggplot(aes(x=Year2,y=net_losses,color=Business))+
+  geom_line()+
+  xlab("Year")+
+  ylab("Yearly Net Losses")+
+  scale_y_continuous(labels = label_number(suffix = " M", scale = 1e-6))+
+  labs(title="Yearly Net Losses per Business")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
