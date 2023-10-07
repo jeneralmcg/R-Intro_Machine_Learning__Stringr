@@ -1,0 +1,68 @@
+---
+title: "Lab 8 Challenge"
+author: "Jen McGregor"
+date: "11/28/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(tidyverse)
+library(tidymodels)
+library(kknn)
+library(glmnet)
+library(discrim)
+library(kernlab)
+set.seed(1)
+```
+
+Recall that PCA has two purposes:
+
+Reduce the dimensionality for interpretability reasons.
+Remove “noise” that is in the lower PCs, for better prediction power.
+In this lab, we mainly used PCA for Goal #1. It was easier to visualize our animal types in the first couple PC dimensions.
+
+But did it also help us in Goal #2?
+
+Try to fit an LDA and an SVM classifier using the original data, rather than the PCA transformed/reduced version. Is this better or worse than the model in the lab?
+
+```{r}
+zoo <- read_csv("https://www.dropbox.com/s/kg89g2y3tp6p9yh/zoo_final.csv?dl=1")
+```
+
+```{r}
+svm_mod2 <- svm_poly(cost = tune(), degree = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+zoo_rec <- recipe(Class_Type~.,data=zoo) %>%
+  update_role(animal_name, new_role = "ID")
+
+svm_grid <- grid_regular(cost(),degree())
+
+svm_wflow <- workflow()%>%
+  add_recipe(zoo_rec) %>%
+  add_model(svm_mod2)
+
+set.seed(1)
+zoo_pcs_cv <- vfold_cv(zoo, v = 5, strata = Class_Type)
+
+svm_grid_search <-
+  tune_grid(
+    svm_wflow,
+    resamples = zoo_pcs_cv,
+    grid = svm_grid
+  )
+
+svm_grid_search %>% 
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  slice_max(mean)
+```
+
+Recall that the SVM model from the lab carried an accuracy rate of 97%. The model shown above that lacks Principal Component Analysis transformations carries an accuracy rate of 97.90%. Although a small margin, we can determine that this model is superior (performs better) than the SVM PCA model. PCA can sometimes lead to losses in information, so this small discrepency in accuracy could potentially be explained by this.
+

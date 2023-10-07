@@ -1,0 +1,306 @@
+---
+title: 'Lab #8: Discriminant Analysis and Support Vector Machines'
+author: "Jen McGregor & Tiffany Parobek"
+date: "11/22/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(kknn)
+library(glmnet)
+library(discrim)
+library(kernlab)
+set.seed(1)
+```
+
+
+```{r include=FALSE}
+zoo <- read_csv("https://www.dropbox.com/s/kg89g2y3tp6p9yh/zoo_final.csv?dl=1")
+```
+
+# Part One: PCA preprocessing
+
+### Q1: PCA
+
+Based on the following: 
+
+![results](lab8-1.png)
+
+The **First Principal Component** has large positive associations with fins and aquatic as well as large negative associations with legs and hair. This principal component seems to represent Fish. 
+
+The **Second Principal Component** has large positive associations with milk, toothed, hair, and catsize as well as large negative associations with eggs. This principal component seems to represent Mammals. 
+
+The **Third Principal Component** has large positive associations with aquatic, predator, and fins as well as large negative associations with airborne, feathers, and breathes. This principal component seems to represent Invertebrates.  
+
+### Q2: Choosing PCs
+
+Based on the following:
+
+![results](lab8-2.png)
+
+We would select **five principal components** to include in a model for predicting species from animal features because the first five principal components account for 90.89% of variance. In practice, often an 90% variance is used as a default threshold to determine the number of principal components to retain, so this model's 90.89% surpasses this amount. 
+
+
+### Q3: New Dataset
+
+```{r}
+zoo_rec <- recipe(Class_Type~.,data=zoo) %>%
+  step_pca(all_numeric(), threshold = 0.8, num_comp = 3, 
+           options = c(center = TRUE))
+```
+
+The prep() step is then used to prepare by computing the PCs, and the bake() function is then used to make a new dataframe with the chosen PCs as columns.
+
+```{r}
+zoo_trained <- zoo_rec %>% prep(zoo)
+zoo_pcs <- zoo_trained %>% bake(zoo)
+```
+
+### Q4: Explore
+
+Plot observations in the first two PC dimensions, colored by the animal species.
+
+#### Plot #3: Principal Components 1 and 2
+
+```{r}
+zoo_pcs %>%
+  ggplot(aes(x=PC1,y=PC2,color=Class_Type))+
+  geom_point()+
+  scale_color_discrete("Class Type")+
+  labs(title="Species Classes based on PC1 and PC2")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+#### Plot #2: Principal Components 2 and 3
+
+```{r}
+zoo_pcs %>%
+  ggplot(aes(x=PC2,y=PC3,color=Class_Type))+
+  geom_point()+
+  scale_color_discrete("Class Type")+
+  labs(title="Species Classes based on PC2 and PC3")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+**Why are certain animal types grouped the way that they are?**
+
+Each animal class type is generally grouped together on both plots. This is a result of animal types being scored on PC's 1, 2, and 3 based on similar attributes and features of animals belonging to that species type. For example, on plot #1, the 'Fish' class type all land around the score of above a 2 on PC and a 0 on PC2. Recall from above that the Fish class type has large positive associations with fins and aquatic as well as large negative associations with legs and hair. These consistent associations provide for a consistent principal component score across this animal class type. 
+
+# Part Two: LDA
+
+Hint: In the following, we are trying to predict the “type” of animal, not the specific animal species. The update_role() addition to your recipe should be used so that the models don’t use the species variable in the classification process.
+
+### Q1: Linear Discriminant 
+
+Classifying Animal Type based on PC1, PC2, PC3.
+
+Accuracy: 0.9000000
+
+ROC AUC: 0.9431429
+
+```{r}
+lda_mod <- discrim_linear() %>%
+  set_engine("MASS") %>%
+  set_mode("classification")
+
+
+zoo_rec <- recipe(Class_Type~.,data=zoo) %>%
+  update_role(animal_name, new_role = "ID") %>%
+  step_pca(all_numeric(), threshold = 0.8, num_comp = 3, 
+           options = c(center = TRUE))
+
+zoo_trained2 <- zoo_rec %>% prep(zoo)
+zoo_pcs2 <- zoo_trained2 %>% bake(zoo)
+
+lda_wflow1 <- workflow() %>%
+  add_recipe(zoo_rec) %>%
+  add_model(lda_mod)
+
+set.seed(1)
+zoo_pcs_cv <- vfold_cv(zoo_pcs2, v = 5)
+
+lda_1_cv <- lda_mod %>%
+  fit_resamples(Class_Type~PC1+PC2+PC3,
+                resamples = zoo_pcs_cv)
+
+lda_1_cv %>% collect_metrics()
+```
+
+### Q2: Quadratic
+
+Classifying Animal Type based on PC1, PC2, PC3.
+
+Accuracy: 0.9800000
+
+ROC AUC: 0.9986667
+
+```{r}
+qda_mod <- discrim_regularized(frac_common_cov = 0) %>% 
+             set_engine('klaR') %>% 
+             set_mode('classification')
+
+zoo_trained3 <- zoo_rec %>% prep(zoo)
+zoo_pcs3 <- zoo_trained3 %>% bake(zoo)
+
+qda_wflow1 <- workflow() %>%
+  add_recipe(zoo_rec) %>%
+  add_model(qda_mod)
+
+set.seed(1)
+zoo_pcs_cv <- vfold_cv(zoo_pcs3, v = 5)
+
+qda_1_cv <- qda_mod %>%
+  fit_resamples(Class_Type~PC1+PC2+PC3,
+                resamples = zoo_pcs_cv)
+
+qda_1_cv %>% collect_metrics()
+```
+
+
+### Q3: Interpretation
+
+**Which classifier did better? Intuitively, why do you think that is?**
+
+The Quadratic Linear Discriminant performed better in both accuracy and ROC AUC. This is because QDA allows the data in the different categories to have different variances. In this example, the QDA allows for different animal class types to have different variances. In looking at the above plots, different animal classes have different variance levels. The fish animal class type certainly has a significantly smaller variance than the mammal class type.
+
+
+# Part Three: SVM
+
+### Q1: Linear
+
+Classifying Animal Type based on PC1, PC2, PC3.
+
+Accuracy: 0.91
+
+```{r}
+svc_mod1 <- svm_poly(cost = tune(), degree = 1) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+svc_grid <- grid_regular(cost())
+
+svc_wflow <- workflow()%>%
+  add_recipe(zoo_rec) %>%
+  add_model(svc_mod1)
+
+set.seed(1)
+zoo_pcs_cv <- vfold_cv(zoo, v = 5)
+
+svc_grid_search <-
+  tune_grid(
+    svc_wflow,
+    resamples = zoo_pcs_cv,
+    grid = svc_grid
+  )
+
+svc_grid_search %>%
+  collect_metrics() %>%
+  filter(.metric == ("accuracy")) %>%
+  slice_max(mean)
+```
+
+
+### Q2: SVM
+
+Classifying Animal Type based on PC1, PC2, PC3.
+
+Accuracy: 0.97
+
+```{r}
+svm_mod2 <- svm_poly(cost = tune(), degree = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+svm_grid <- grid_regular(cost(),degree())
+
+svm_wflow <- workflow()%>%
+  add_recipe(zoo_rec) %>%
+  add_model(svm_mod2)
+
+set.seed(1)
+zoo_pcs_cv <- vfold_cv(zoo, v = 5)
+
+svm_grid_search <-
+  tune_grid(
+    svm_wflow,
+    resamples = zoo_pcs_cv,
+    grid = svm_grid
+  )
+
+svm_grid_search %>% 
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  slice_max(mean)
+
+#Optimal degree is 2
+svm_mod2 <- svm_poly(cost = 1, degree = 2) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+svm_wflow <- workflow()%>%
+  add_recipe(zoo_rec) %>%
+  add_model(svm_mod2)
+
+svm_fit <- svm_wflow %>%
+  fit(zoo)
+```
+
+### Q3: Interpretation
+
+**Explain intuitively why your polynomial SVM had better accuracy than your ordinary linear one.**
+
+Classifications of different animal class types are not linearly separable. As such, polynomial SVMs will work better in accuracy to classify different animal class types. This is evidenced by the polynomial SVM's increased accuracy and ROC AUC values. 
+
+# Part Four: Prediction
+
+Alter the code below to make a data set with one observation, representing a human. Use your best LDA or QDA model, and your best SVC or SVM model, to predict the species of a human.
+
+Instead of finding only the first predicted type, show the probabilities of each category. (Recall: the type = "prob" option in the predict() function)
+
+(Hint: the catsize variable means “bigger than a cat”)
+
+LDA vs QDA Model: QDA Model used due to its higher accuracy.
+SVC cs SVM Model: SVM Model used due to its higher accuracy.
+
+```{r}
+human <- data.frame(
+  animal_name = "human",
+  hair = 1,
+  feathers = 0,
+  eggs = 0,
+  milk = 1, 
+  airborne = 0,
+  aquatic = 0,
+  predator = 1,
+  toothed = 1,
+  backbone = 1,
+  breathes = 1,
+  venomous = 0,
+  fins = 0,
+  legs = 2,
+  tail = 0,
+  domestic = 0,
+  catsize = 1
+)
+```
+
+```{r include=FALSE}
+human$animal_name <- as.factor(human$animal_name)
+```
+
+```{r, Using QDA Model}
+options(scipen=999)
+qda_fit <- fit(qda_wflow1, zoo)
+predict(qda_fit, human, type="prob")
+```
+
+```{r, Using SVM Model}
+options(scipen=999)
+predict(svm_fit, human, type="prob")
+```
+

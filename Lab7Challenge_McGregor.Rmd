@@ -1,0 +1,377 @@
+---
+title: "Lab 7 Challenge"
+author: "Jen McGregor"
+date: "11/15/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(tidymodels)
+library(tidyverse)
+library(kknn)
+library(tune)
+library(workflows)
+library(ggplot2)
+```
+
+# Challenge: Cohen’s Kappa
+
+### Cohen's Kappa Calculations
+
+Metric       | KNN M1  | KNN M2   | KNN M3  | KNN M4  | Winner |
+-------------| ------  | -------- |---------|---------|--------|
+Cohen's Kappa|0.4403893|0.4320988 |0.4850746|0.4059041|KNN M3  |
+
+Metric       | LR M1   | LR M2    | LR M3   | LR M4   | Winner      |
+-------------| ------  | -------- |---------|---------|-------------|
+Cohen's Kappa|0.6768838|0.6181354 |0.6768838|0.5903308|LR M1 + LR M3|
+
+Metric       | KNN M3  | LR M1 / LR M3   | Winner      |
+-------------| ------  | --------------- |-------------|
+Cohen's Kappa|0.4850746|0.6768838        |LR M1 + LR M3|
+
+
+```{r include=FALSE}
+myData <- read_csv("https://www.dropbox.com/s/aohbr6yb9ifmc8w/heart_attack.csv?dl=1")
+myData$sex <- as.factor(myData$sex)
+myData$cp <- as.factor(myData$cp)
+myData$restecg <- as.factor(myData$restecg)
+myData$output <- as.factor(myData$output)
+```
+
+```{r KNN}
+knn_mod_tune <- nearest_neighbor(neighbors = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+k_grid <- grid_regular(neighbors(c(1,50)), 
+                       levels = 25)
+
+set.seed(1)
+myData_split <- myData %>%
+  initial_split()
+myData_test <- myData_split%>%
+  testing()
+myData_train <- myData_split%>%
+  training()
+```
+
+```{r KNN M1}
+knn_rec1 <- recipe(output~age+sex+cp+trtbps+chol+restecg+thalach,data=myData) %>%
+  step_dummy(sex,cp,restecg) %>%
+  step_normalize(age,trtbps,chol,thalach)
+
+knn_wflow <- workflow() %>%
+  add_recipe(knn_rec1) %>%
+  add_model(knn_mod_tune)
+
+myData_cv <- vfold_cv(myData, v = 10)
+
+knn_grid_search <-
+  tune_grid(knn_wflow,
+    resamples = myData_cv,
+    grid = k_grid
+  )
+knn_grid_search %>% collect_metrics()
+
+knn_final <- knn_grid_search %>%
+  select_best(metric="roc_auc")
+
+knn_wflow <- knn_wflow %>%
+  finalize_workflow(knn_final)
+
+knn_fit <- knn_wflow %>%
+  last_fit(myData_split)
+
+test_performance <- knn_fit %>% collect_metrics()
+
+test_predictions <- knn_fit %>% collect_predictions()
+```
+
+```{r, CK KNN1}
+#KNN Model 1
+test_predictions %>%
+  kap(truth=output,estimate = .pred_class)
+```
+
+```{r, include=FALSE}
+knn_rec2 <- recipe(output~sex+cp+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(trtbps,thalach)
+
+knn_wflow <- workflow() %>%
+  add_recipe(knn_rec2) %>%
+  add_model(knn_mod_tune)
+
+myData_cv <- vfold_cv(myData, v = 10)
+
+knn_grid_search <-
+  tune_grid(knn_wflow,
+    resamples = myData_cv,
+    grid = k_grid
+  )
+
+knn_grid_search %>% collect_metrics()
+
+knn_final <- knn_grid_search %>%
+  select_best(metric="roc_auc")
+
+knn_wflow <- knn_wflow %>%
+  finalize_workflow(knn_final)
+
+knn_fit <- knn_wflow %>%
+  last_fit(myData_split)
+
+test_performance <- knn_fit %>% collect_metrics()
+test_predictions <- knn_fit %>% collect_predictions()
+```
+
+```{r, CK KNN2}
+#KNN Model 2
+test_predictions %>%
+  kap(truth=output,estimate = .pred_class)
+```
+
+```{r include=FALSE}
+knn_rec3 <- recipe(output~sex+chol+cp+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(chol,thalach,trtbps)
+
+knn_wflow <- workflow() %>%
+  add_recipe(knn_rec3) %>%
+  add_model(knn_mod_tune)
+
+myData_cv <- vfold_cv(myData, v = 10)
+
+knn_grid_search <-
+  tune_grid(knn_wflow,
+    resamples = myData_cv,
+    grid = k_grid
+  )
+
+knn_grid_search %>% collect_metrics()
+
+knn_final <- knn_grid_search %>%
+  select_best(metric="roc_auc")
+
+knn_wflow <- knn_wflow %>%
+  finalize_workflow(knn_final)
+
+knn_fit <- knn_wflow %>%
+  last_fit(myData_split)
+
+test_performance <- knn_fit %>% collect_metrics()
+test_predictions <- knn_fit %>% collect_predictions()
+```
+
+```{r, CK KNN3}
+#KNN Model 3
+test_predictions %>%
+  kap(truth=output,estimate = .pred_class)
+```
+
+```{r include=FALSE}
+knn_rec4 <- recipe(output~sex+cp+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(thalach)
+
+knn_wflow <- workflow() %>%
+  add_recipe(knn_rec4) %>%
+  add_model(knn_mod_tune)
+
+myData_cv <- vfold_cv(myData, v = 10)
+
+knn_grid_search <-
+  tune_grid(knn_wflow,
+    resamples = myData_cv,
+    grid = k_grid
+  )
+
+knn_grid_search %>% collect_metrics()
+
+knn_final <- knn_grid_search %>%
+  select_best(metric="roc_auc")
+
+knn_wflow <- knn_wflow %>%
+  finalize_workflow(knn_final)
+
+knn_fit <- knn_wflow %>%
+  last_fit(myData_split)
+
+test_performance <- knn_fit %>% collect_metrics()
+test_predictions <- knn_fit %>% collect_predictions()
+```
+
+```{r CK KNN 4 }
+# KNN Model 4
+test_predictions %>%
+  kap(truth=output,estimate = .pred_class)
+```
+
+```{r}
+logitmod <- logistic_reg() %>%
+  set_mode("classification")%>%
+  set_engine("glm")
+```
+
+```{r Logit Model 1, warning=FALSE}
+logit_rec1 <- recipe(output~age+sex+cp+trtbps+chol+restecg+thalach,data=myData) %>%
+  step_dummy(sex,cp,restecg) %>%
+  step_normalize(age,trtbps,chol,thalach)
+
+logit_wflow <- workflow() %>%
+  add_recipe(logit_rec1) %>%
+  add_model(logitmod)
+
+myData_cv <- vfold_cv(myData, v = 10)
+
+logit_grid_search <-
+  tune_grid(logit_wflow,
+    resamples = myData_cv
+  )
+
+logit_final <- logit_grid_search %>%
+  select_best(metric="roc_auc")
+
+logit_wflow <- logit_wflow %>%
+  finalize_workflow(logit_wflow)
+
+logit_fit <- logit_wflow %>%
+  last_fit(myData_split)
+
+test_performance <- logit_fit %>% collect_metrics()
+
+logit_test_predictions <- logit_fit %>% collect_predictions()
+```
+
+```{r CK Logit 1}
+# Logit Model 1
+logit_test_predictions %>%
+  kap(truth=output,estimate = .pred_class)
+```
+
+```{r Logit Model 2, include=FALSE}
+logit_rec2 <- recipe(output~sex+cp+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(trtbps,thalach)
+
+logit_wflow <- workflow() %>%
+  add_recipe(logit_rec2) %>%
+  add_model(logitmod)
+
+myData_cv <- vfold_cv(myData, v = 10)
+
+logit_grid_search <-
+  tune_grid(logit_wflow,
+    resamples = myData_cv
+  )
+logit_grid_search %>% collect_metrics()
+
+logit_final <- logit_grid_search %>%
+  select_best(metric="roc_auc")
+
+logit_wflow <- logit_wflow %>%
+  finalize_workflow(logit_wflow)
+
+logit_fit <- logit_wflow %>%
+  last_fit(myData_split)
+
+test_performance <- logit_fit %>% collect_metrics()
+
+logit_test_predictions <- logit_fit %>% collect_predictions()
+```
+
+```{r CK Logit 2}
+# Logit Model 2
+logit_test_predictions %>%
+  kap(truth=output,estimate = .pred_class)
+```
+
+```{r Logit Model 3, include=FALSE}
+logit_rec3 <- recipe(output~sex+cp+chol+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(chol,thalach,trtbps)
+
+logit_wflow <- workflow() %>%
+  add_recipe(logit_rec3) %>%
+  add_model(logitmod)
+
+myData_cv <- vfold_cv(myData, v = 10)
+
+logit_grid_search <-
+  tune_grid(logit_wflow,
+    resamples = myData_cv
+  )
+logit_grid_search %>% collect_metrics()
+
+logit_final <- logit_grid_search %>%
+  select_best(metric="roc_auc")
+
+logit_wflow <- logit_wflow %>%
+  finalize_workflow(logit_wflow)
+
+logit_fit <- logit_wflow %>%
+  last_fit(myData_split)
+
+test_performance <- logit_fit %>% collect_metrics()
+
+logit_test_predictions <- logit_fit %>% collect_predictions()
+```
+
+```{r CK Logit 3}
+#Logit Model 3
+logit_test_predictions %>%
+  kap(truth=output,estimate = .pred_class)
+```
+
+
+```{r Logit Model 4, include=FALSE}
+logit_rec4 <- recipe(output~sex+cp+chol+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(chol,thalach)
+
+logit_wflow <- workflow() %>%
+  add_recipe(logit_rec4) %>%
+  add_model(logitmod)
+
+myData_cv <- vfold_cv(myData, v = 10)
+
+logit_grid_search <-
+  tune_grid(logit_wflow,
+    resamples = myData_cv
+  )
+logit_grid_search %>% collect_metrics()
+
+logit_final <- logit_grid_search %>%
+  select_best(metric="roc_auc")
+
+logit_wflow <- logit_wflow %>%
+  finalize_workflow(logit_wflow)
+
+logit_fit <- logit_wflow %>%
+  last_fit(myData_split)
+
+test_performance <- logit_fit %>% collect_metrics()
+
+logit_test_predictions <- logit_fit %>% collect_predictions()
+```
+
+```{r CK Logit 4}
+# Logit Model 4
+logit_test_predictions %>%
+  kap(truth=output,estimate = .pred_class)
+```
+
+### Reasons or scenarios to use Cohen’s Kappa as our measure of model success
+
+Cohen’s Kappa bases its calculations on the confusion matrix. Unlike accuracy calculations, Cohen’s Kappa accounts for unequal class distributions. As such, this metric may be especially useful when the provided data set heavily favors one class over another. 
+
+### Do your conclusions from above change if you judge your models using Cohen’s Kappa instead? Does this make sense?
+
+According to the Cohen's Kappa calculations, logistic models one and three are the superior models with Cohen's Kappa scores of 0.6768838 each. The Logistic Regression Model 3 had the highest cross validation accuracy score in the lab portion, so the conclusions remain the same. This makes sense because our original dataset does not heavily favor one class over another. 
+

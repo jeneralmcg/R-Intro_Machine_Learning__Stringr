@@ -1,0 +1,393 @@
+---
+title: "Telecom Customers Report"
+author: "Jen McGregor"
+date: "December 5, 2021"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    code_folding: show
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE)
+library(tidyverse)
+library(tidymodels)
+library(rpart.plot)
+library(discrim)
+library(baguette)
+library(janitor)
+library(readr)
+set.seed(1)
+```
+
+```{r include=FALSE}
+myData <- read_csv("https://www.dropbox.com/s/9dymy30v394ud8h/Telecust1.csv?dl=1")
+
+myData$region <- as.factor(myData$region)
+myData$marital <- as.factor(myData$marital)
+myData$ed <- as.factor(myData$ed)
+myData$retire <- as.factor(myData$retire)
+myData$gender <- as.factor(myData$gender)
+myData$custcat <- as.factor(myData$custcat)
+myData$reside <- as.factor(myData$reside)
+
+str(myData)
+```
+
+To arrive at the best model for making predictions of customer categories, I first ran a standard logistic regression outside of the tidy models framework to determine individual significance. 
+
+```{r include=FALSE}
+tester <- glm(custcat~., family=binomial,data=myData)
+```
+
+```{r}
+summary(tester)
+```
+
+Using a significance level of 5%, I determined that the **tenure** and **ed** variables were both statistically significant. The **age** and **reside** variables were almost significant as well; holding p values of 0.061433 and 0.054180, respectively. After running a few models with these predictors (only), I felt as though a different explanatory variable combination would produce a higher accuracy than the rates I was getting. As such, I re-evaluated the variables just listed. Simpler models generally are better in future predictions than more complex ones; the goal here is to not over fit that data set provided by our management team.
+
+The ‘reside’ variable in particular was of concern. 
+
+```{r}
+myData$reside %>% summary()
+```
+The data set supplemental materials provided little context as to the variable "reside"'s meaning. Did the values 1-8 pertain to years at a residence or did those values correlate to categories of residences (labeled 1-8)? In initial data wrangling (found above in part 3), the ‘reside’ variable was converted into a factor, certainly affecting analysis. However, this was not an assured variable structure. As such, I decided to remove it from the recipe. In doing so, I was able to arrive at a higher accuracy across all machine learning structures. Note: 5-fold cross validation was used across all models. 
+
+```{r include=FALSE}
+tester2 <- glm(custcat~region+tenure+age+income+marital+address+ed+employ+retire+gender, family=binomial,data=myData)
+```
+
+```{r}
+summary(tester2)
+```
+
+```{r, setting up cross validation and recipe}
+cv <- vfold_cv(myData, v = 5)
+
+recipe <- recipe(custcat ~ tenure+age+ed+income+region, data = myData) %>%
+  step_normalize(all_numeric()) %>%
+  step_dummy(all_nominal(), -custcat)
+```
+
+
+Metric   | KNN   | Logistic | Bagging  | Random Forest|Neural Networks
+---------| ------| -------- |----------|--------------|---------------
+Accuracy |0.377  | 0.3900000|0.3333333 | 0.3792415    | 0.4071856
+
+The table above provides a comparison in accuracy across the different machine learning structures. 
+
+## Models Attempted {.tabset}
+
+### KNN
+
+The K Nearest Neighbors model was attempted first. Through the tuning of neighbors, the best accuracy was found to be around K = 40, with accuracy value of 0.377. The KNN Model was able to **predict customer category B the best, with an accuracy rate of 0.6074074**. When fit to the final model, the overall KNN accuracy was 0.552. The other customer category accuracy rates from the KNN model can be found in the following table:
+
+Metric   | Cat. A  | Cat. B  | Cat. C  |Cat. D   | Overall
+---------| --------| --------|---------|---------|---------
+Accuracy |0.5638298|0.6074074|0.5426829|0.5215686|0.552
+
+```{r}
+knn_mod <- nearest_neighbor(neighbors = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+k_grid <- grid_regular(neighbors(c(2, 40)), levels = 10)
+
+knn_wflow <- workflow() %>%
+  add_model(knn_mod) %>%
+  add_recipe(recipe) 
+
+knn_wflow %>%
+  tune_grid(
+    grid = k_grid,
+    resamples = cv
+  ) %>%
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  arrange(desc(mean))
+```
+
+```{r,KNN2 final mod}
+knn_mod_final <- nearest_neighbor(neighbors = 40) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+knn_wflow <- workflow() %>%
+  add_model(knn_mod_final) %>%
+  add_recipe(recipe) 
+
+knn_final <- knn_wflow %>% fit(myData)
+
+knn_preds <- predict(knn_final, myData)
+
+KNN_table <- myData %>%
+  mutate(
+   preds = knn_preds$.pred_class 
+  ) %>%
+  count(preds, custcat)
+KNN_table
+
+#Accuracy Overall
+sum(KNN_table$n[1]+KNN_table$n[6]+KNN_table$n[11]+KNN_table$n[16])/sum(KNN_table$n)
+
+#Predicting A
+KNN_table$n[1]/sum(sum(KNN_table$n[c(2:4)])+KNN_table$n[1])
+
+#Predicting B
+KNN_table$n[6]/sum(sum(KNN_table$n[c(5,7:8)])+KNN_table$n[6])
+
+#Predicting C
+KNN_table$n[11]/sum(sum(KNN_table$n[c(9:10,12)])+KNN_table$n[11])
+
+#Predicting D
+KNN_table$n[16]/sum(sum(KNN_table$n[c(13:15)])+KNN_table$n[16])
+```
+
+### Logistic 
+
+The logistic model was attempted next, using a multinomial regression function and the "nnet" engine due to the non-binary response variable classification structure. The Logistic Model was able to **predict customer category A the best, with an accuracy rate of 0.4462541**. When fit to the final model, the overall Logistic accuracy was 0.433. The other customer category accuracy rates from the KNN model can be found in the following table:
+
+Metric   | Cat. A  | Cat. B  | Cat. C  |Cat. D   | Overall
+---------| --------| --------|---------|---------|--------
+Accuracy |0.4462541|0.4044118|0.4231975|0.4453782|0.433
+
+```{r,Logistic}
+lr_mod <- multinom_reg() %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+lr_wflow <- workflow() %>%
+  add_model(lr_mod) %>%
+  add_recipe(recipe) 
+
+lr_wflow %>%
+  fit_resamples(cv) %>%
+  collect_metrics()
+
+lr_final <- lr_wflow %>% fit(myData)
+
+lr_preds <- predict(lr_final, myData)
+
+Logit_table <- myData %>%
+  mutate(
+   preds = lr_preds$.pred_class 
+  ) %>%
+  count(preds, custcat)
+Logit_table
+
+#Accuracy Overall
+sum(Logit_table$n[1]+Logit_table$n[6]+Logit_table$n[11]+Logit_table$n[16])/sum(Logit_table$n)
+
+#Predicting A
+Logit_table$n[1]/sum(sum(Logit_table$n[c(2:4)])+Logit_table$n[1])
+
+#Predicting B
+Logit_table$n[6]/sum(sum(Logit_table$n[c(5,7:8)])+Logit_table$n[6])
+
+#Predicting C
+Logit_table$n[11]/sum(sum(Logit_table$n[c(9:10,12)])+Logit_table$n[11])
+
+#Predicting D
+Logit_table$n[16]/sum(sum(Logit_table$n[c(13:15)])+Logit_table$n[16])
+```
+
+
+### Bagging
+
+The bagging model was attempted next. The Bagging Model was able to **predict customer category A the best, with an accuracy rate of 0.6860068**. When fit to the final model, the overall Logistic accuracy was 0.664 The other customer category accuracy rates from the KNN model can be found in the following table:
+
+Metric   | Cat. A  | Cat. B  | Cat. C  |Cat. D   | Overall
+---------| --------| --------|---------|---------|--------
+Accuracy |0.6860068|0.6296296|0.6828358|0.6457399|0.664
+
+```{r include=FALSE}
+set.seed(1)
+splits <- myData %>% 
+  initial_split(0.5, strata = custcat)
+
+training <- splits %>% training()
+testing <- splits %>% testing()
+```
+
+```{r,Bagging}
+options(scipen=999)
+set.seed(1)
+
+bagging_mod <- bag_tree() %>%
+  set_engine("rpart",times=25) %>%
+  set_mode("classification")
+
+bagging_wflow <- workflow() %>%
+  add_recipe(recipe) %>%
+  add_model(bagging_mod)
+
+bag_tree_fit <- bagging_wflow %>%
+  fit(training)
+
+bag_pred <- testing %>% 
+        select(custcat) %>%
+  bind_cols(
+    predict(bag_tree_fit, testing),
+    predict(bag_tree_fit, testing, type = "prob")
+  )
+
+bag_preds <- predict(bag_tree_fit,myData)
+
+bag_pred %>%
+  accuracy(estimate = .pred_class,
+           truth = custcat)
+
+bag_table <- myData %>%
+  mutate(
+   preds = bag_preds$.pred_class 
+  ) %>%
+  count(preds, custcat)
+bag_table
+
+#Accuracy Overall
+sum(bag_table$n[1]+bag_table$n[6]+bag_table$n[11]+bag_table$n[16])/sum(bag_table$n)
+
+#Predicting A
+bag_table$n[1]/sum(sum(bag_table$n[c(2:4)])+bag_table$n[1])
+
+#Predicting B
+bag_table$n[6]/sum(sum(bag_table$n[c(5,7:8)])+bag_table$n[6])
+
+#Predicting C
+bag_table$n[11]/sum(sum(bag_table$n[c(9:10,12)])+bag_table$n[11])
+
+#Predicting D
+bag_table$n[16]/sum(sum(bag_table$n[c(13:15)])+bag_table$n[16])
+```
+
+### Random Forest
+
+The Random Forest model was attempted next. Through the tuning of mtry and min_n, the best accuracy was found to be around mtry=1,min_n=2 with accuracy value of 0.392. After fitting the model, **the overall accuracy was determined to be 0.3792415**.
+
+```{r, Random Forest}
+forest_mod <- rand_forest(mtry = tune(), trees = 1000, min_n = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+forest_wflow <- workflow() %>%
+  add_recipe(recipe) %>%
+  add_model(forest_mod)
+
+forest_res <-
+  tune_grid(
+    forest_wflow,
+    resamples = cv,
+    grid = 11
+  )
+
+bestacc <- forest_res %>% 
+  show_best(metric = "accuracy")
+bestacc
+
+#The best accuracy was found to be around mtry=1,min_n=2 with accuracy value of 0.392
+
+last_forest_mod <- rand_forest(mtry = 1, trees = 1000, min_n = 2) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+last_forest_wflow <- forest_wflow %>%
+  update_model(last_forest_mod)
+
+set.seed(1)
+
+last_rf_fit <- last_forest_wflow %>%
+  last_fit(splits)
+
+last_rf_fit %>%
+  collect_metrics()
+```
+
+### Neural Networks
+
+The Neural Networks model was attempted last. Through the tuning of hidden unitys, penalty, and epochs, the best accuracy was found to be around hidden_units=10,penalty=1,epochs=505 with accuracy value of 0.404. After fitting the model, **the overall accuracy was determined to be 0.4071856.**
+
+```{r NN}
+nn_grid <- grid_regular(
+  hidden_units(),
+  penalty(),
+  epochs(),
+  levels = 3
+)
+
+nn_mod <- mlp(
+  hidden_units = tune(),
+  penalty = tune(),
+  epochs = tune(),
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+nn_wflow <- workflow() %>%
+  add_recipe(recipe) %>%
+  add_model(nn_mod)
+
+nn_grid_search <-
+  tune_grid(
+    nn_wflow,
+    resamples = cv,
+    grid = nn_grid
+  )
+
+bestacc <- nn_grid_search %>% 
+  show_best(metric = "accuracy")
+bestacc
+
+#The best accuracy was found to be around hidden_units=10,penalty=1,epochs=505 with accuracy value of 0.404
+
+last_nn_mod <- mlp(
+  hidden_units = 10,
+  penalty = 1,
+  epochs = 505,
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+last_nn_wflow <- nn_wflow %>%
+  update_model(last_nn_mod)
+
+set.seed(1)
+
+last_nn_fit <- last_nn_wflow %>%
+  last_fit(splits)
+
+last_nn_fit %>%
+  collect_metrics()
+```
+
+## Plot
+
+As evidenced by the below plot, the KNN model predicts each of the four customer categories correctly more than any other customer category each time. Most customers fall into categories A and C, with Category B having the least amount of customers. Does Category B comprise a niche market share, or do more customers need to be reached out to to determine better predictive power? I tend to lean towards the former, as this model was able to predict Category B customers the best!
+
+```{r}
+KNN_table %>%
+  ggplot(aes(x=custcat,y=n,fill=preds))+
+  geom_col() +
+  ylab("Customers")+
+  xlab("Customer Category")+
+  scale_fill_discrete("Predicted Category")+
+  labs(title="KNN Predictive Power Across Telecom Customer Categories")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Conclusion
+
+Takeaways:
+
+  * Customer Categories A and B are predicted the easiest.
+  
+  * Although Category B customers comprise the least frequency category, they represent a niche demographic and are easiest to identify with KNN. 
+  
+  * The bagging model has the strongest predictive power. 
+  
+  * The KNN model is easier to implement and interpret with less computational power required, so it is recommended to use the KNN model for future customer predictions. 
+  
+  * The company should find more identifiable attributes to identify customers in categories C and D.

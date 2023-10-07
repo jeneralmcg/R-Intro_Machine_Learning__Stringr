@@ -1,0 +1,740 @@
+---
+title: "Lab 7"
+author: "Jen McGregor"
+date: "11/11/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(tidymodels)
+library(tidyverse)
+library(kknn)
+library(tune)
+library(workflows)
+library(ggplot2)
+```
+
+# Part One: Fitting Models
+
+#### Exploring and Summarizing the Dataset
+
+```{r}
+myData <- read_csv("https://www.dropbox.com/s/aohbr6yb9ifmc8w/heart_attack.csv?dl=1")
+
+myData$sex <- as.factor(myData$sex)
+myData$cp <- as.factor(myData$cp)
+myData$restecg <- as.factor(myData$restecg)
+myData$output <- as.factor(myData$output)
+
+length(which(myData$sex=="1"))
+length(which(myData$sex=="0"))
+
+mean(myData$age)
+table(myData$cp)
+table(myData$output)
+str(myData)
+
+myData %>%
+  ggplot(aes(x=sex,fill=output))+
+  geom_bar()
+```
+
+
+```{r, Split Data into Training and Testing Set}
+set.seed(1)
+myData_split <- myData %>%
+  initial_split()
+myData_test <- myData_split%>%
+  testing()
+myData_train <- myData_split%>%
+  training()
+```
+
+### Q1: KNN
+
+```{r, Use KNN CV ROC to find best model,using all predictors}
+knn_mod_tune <- nearest_neighbor(neighbors = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+k_grid <- grid_regular(neighbors(c(1,50)), 
+                       levels = 25)
+```
+
+```{r, KNN Model 1: using all predictors}
+#Model 1: using all predictors
+knn_rec <- recipe(output~age+sex+cp+trtbps+chol+restecg+thalach,data=myData) %>%
+  step_dummy(sex,cp,restecg) %>%
+  step_normalize(age,trtbps,chol,thalach)
+
+knn_wflow1 <- workflow() %>%
+  add_recipe(knn_rec) %>%
+  add_model(knn_mod_tune)
+```
+
+```{r, KNN Model 2: removing age,restecg,chol}
+#Model 2: removing age,restecg,chol
+knn_rec <- recipe(output~sex+cp+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(thalach,trtbps)
+
+knn_wflow <- workflow() %>%
+  add_recipe(knn_rec) %>%
+  add_model(knn_mod_tune)
+```
+
+```{r, KNN Model 4: removing age,restecg,chol,trtbps}
+#Model 4: removing age,restecg,chol,trtbps
+knn_rec <- recipe(output~sex+cp+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(thalach)
+
+knn_wflow <- workflow() %>%
+  add_recipe(knn_rec) %>%
+  add_model(knn_mod_tune)
+```
+
+```{r, KNN Model 3: removing age,restecg}
+#Model 3: removing age,restecg
+knn_rec <- recipe(output~sex+chol+cp+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(chol,thalach,trtbps)
+
+knn_wflow <- workflow() %>%
+  add_recipe(knn_rec) %>%
+  add_model(knn_mod_tune)
+```
+
+#### Finding the Best Model based on ROC AUC to Predict Output
+
+```{r, KNN Cross Validation to find best model}
+# Model 3
+myData_cv <- vfold_cv(myData, v = 10)
+
+knn_grid_search <-
+  tune_grid(knn_wflow,
+    resamples = myData_cv,
+    grid = k_grid
+  )
+knn_grid_search %>% collect_metrics()
+
+knn_final <- knn_grid_search %>%
+  select_best(metric="roc_auc")
+knn_final
+
+knn_wflow <- knn_wflow %>%
+  finalize_workflow(knn_final)
+```
+
+#### The Cross Validated ROC AUC Metric
+
+```{r, KNN fit on the training set and evaluate on test set}
+#Model 3
+knn_fit <- knn_wflow %>%
+  last_fit(myData_split)
+knn_fit
+
+test_performance <- knn_fit %>% collect_metrics()
+test_performance
+```
+
+#### Output a Confusion Matrix 
+
+```{r, KNN Generate Confusion Matrix}
+
+# Model 3: generate predictions from the test set
+test_predictions <- knn_fit %>% collect_predictions()
+test_predictions
+
+test_predictions %>% 
+  conf_mat(truth = output, estimate = .pred_class)
+
+test_predictions %>%
+  kap(truth=output,estimate = .pred_class)
+
+test_predictions %>%
+  ggplot() +
+  geom_density(aes(x = .pred_1, fill = output), 
+               alpha = 0.5)
+```
+
+#### Fit the Final Model
+
+```{r, KNN Fit Final Model}
+#Model 3
+final_model <- fit(knn_wflow, myData)
+final_model
+````
+
+### Q2: Logistic Regression
+
+```{r}
+logitmod <- logistic_reg() %>%
+  set_mode("classification")%>%
+  set_engine("glm")
+```
+
+```{r, Model 1: using all predictors}
+#Model 1: using all predictors
+logit_rec <- recipe(output~age+sex+cp+trtbps+chol+restecg+thalach,data=myData) %>%
+  step_dummy(sex,cp,restecg) %>%
+  step_normalize(age,trtbps,chol,thalach)
+
+logit_wflow <- workflow() %>%
+  add_recipe(logit_rec) %>%
+  add_model(logitmod)
+```
+
+```{r, Model 2: using all predictors except age, restecg, and chol}
+#Model 2: using all predictors except age, restecg, and chol
+logit_rec <- recipe(output~sex+cp+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(trtbps,thalach)
+
+logit_wflow <- workflow() %>%
+  add_recipe(logit_rec) %>%
+  add_model(logitmod)
+```
+
+```{r,Model 4: using all predictors except age, restecg, chol, and trtbps}
+#Model 4: using all predictors except age, restecg, chol, and trtbps
+logit_rec <- recipe(output~sex+cp+chol+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(chol,thalach)
+
+logit_wflow <- workflow() %>%
+  add_recipe(logit_rec) %>%
+  add_model(logitmod)
+```
+
+```{r, Model 3: using all predictors except age, restecg, and chol}
+#Model 3: using all predictors except age and restecg
+logit_rec <- recipe(output~sex+cp+chol+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(trtbps,chol,thalach)
+
+logit_wflow <- workflow() %>%
+  add_recipe(logit_rec) %>%
+  add_model(logitmod)
+```
+
+#### Finding the Best Model based on ROC AUC to Predict Output
+
+
+```{r}
+myData_cv <- vfold_cv(myData, v = 10)
+
+logit_grid_search <-
+  tune_grid(logit_wflow,
+    resamples = myData_cv
+  )
+logit_grid_search %>% collect_metrics()
+
+logit_final <- logit_grid_search %>%
+  select_best(metric="roc_auc")
+logit_final
+
+logit_wflow <- logit_wflow %>%
+  finalize_workflow(logit_wflow)
+```
+
+#### The Cross Validated ROC AUC Metric
+
+```{r, fit on the training set and evaluate on test set}
+logit_fit <- logit_wflow %>%
+  last_fit(myData_split)
+logit_fit
+
+test_performance <- logit_fit %>% collect_metrics()
+test_performance
+```
+
+#### Output a Confusion Matrix 
+
+```{r, Generate Confusion Matrix}
+logit_test_predictions <- logit_fit %>% collect_predictions()
+logit_test_predictions
+
+logit_test_predictions %>% 
+  conf_mat(truth = output, estimate = .pred_class)
+
+logit_test_predictions %>%
+  ggplot() +
+  geom_density(aes(x = .pred_1, fill = output), 
+               alpha = 0.5)
+```
+
+```{r, Fit Final Model}
+logit_final_model <- fit(logit_wflow, myData)
+logit_final_model
+````
+
+### Q3: Interpretation
+
+### General
+
+I started by exploring the dataset. My understanding prior to completing this assignment was that men are more susceptible to heart attacks. The data description did not indicate whether sex equaling 0 or 1 meant male or female, so I decided to explore the 'sex' variable more to make that determination. There were 184 instances of sex=1 and 89 instances of sex=0. A significantly higher proportion of sex=0 were labeled with an output of 1 (not at risk for a heart attack) than were sex=1. Because of this, I can speculate that perhaps sex=0 is men, but there is no way to no for sure.
+
+#### KNN Interpretation
+
+To select the best model, I used KNN tuning to select the one with the highest ROC AUC value. 
+
+**Model 1**: The first recipe I attempted was using all predictors. The best model was determined to be the one using 47 neighbors, Preprocessor1_Model24 which had a ROC AUC of 0.8503738. The cross validated (using k-fold of 10) ROC AUC value was 0.8358974. This model seemed to be good at predicting output equal to 0, but not as much at predicting output equal to 1 based on the confusion matrix produced. 
+
+**Model 2**: Next, I tried a recipe removing age, restecg, and chol from the model. This produced a best model with 50 neighbors which had a ROC AUC of 0.8513955. The cross validated (using a k-fold of 10) ROC AUC value was 0.8555556. 
+
+**Model 3**: Next, I tried a recipe identical to the second model, this time readding chol back to the model (removing only age and restecg from the model). This produced a best model with 50 neighbors, Preprocessor1_Model25 which had a ROC AUC of 0.8499943. The cross validated (using k-fold of 10) ROC AUC value was 0.8538462, an improvement from the full model but slightly lower than the second model. 
+
+**Model 4**: The final model recipe attempted to create a more simple model, this time removing age, restecg, chol, and trtbps. This produced a best model with 47 neighbors, which had a ROC AUC of 0.8442573. The cross validated (using k-fold of 10) ROC AUC value was 0.8559829, the highest out of all four models tested. 
+
+For all four models, based on the density plot, KNN models 2, 3, and 4 perform decently well at classifying cases of output 0, that is: not at risk of heart attack. However, all four models produced density plots (shown below) showing moderate to weak predictive power of predicting output cases of 1, that is: at risk of heart attack. A more powerful model is best at predicting 1s than 0s in this instance: it is more valuable to know you are at risk of heart attack than not for preventative measures to be put in place. Model 3 appears to predict cases of heart attack the best; **Model 3 is the best KNN model**.
+
+
+#### KNN Models' Density Graphs 
+
+![KNN Model 1](Model1.png)
+
+![KNN Model 2](Model2.png)
+
+![KNN Model 3](Model3.png)
+
+![KNN Model 4](Model4.png)
+
+#### Logistic Regression Interpretation
+
+After creating KNN models, I next turned to logistic regression. I created 4 models using the same variable combinations as used in the KNN models. 
+
+**Model 1**: The first recipe I attempted was using all predictors. This model had a ROC AUC of 0.8634781. The cross validated ROC AUC was 0.8658120. 
+
+**Model 2**: The second recipe uses all predictors except age, restecg, and chol. This model had a ROC AUC of 0.8660171. The cross validated ROC AUC was 0.8940171, an improvement over the full model (1). However, the density plot shows that Model 2 is weaker in predicting output equal to 0 (not at risk of a heart attack) than Model 1.
+
+**Model 3**: The third recipe uses all predictors except age and restecg (essentially just re-adding chol back into the model). This model had a ROC AUC of 0.8730170. The cross validated ROC AUC was 0.8940171, an identical result to model 2. However, its density graph shows better predictive power in predicting risk versus no risk of having a heart attack than Model 2. 
+
+**Model 4**: The fourth recipe uses all predictors except age, restecg, chol, and trtbps. This model had a ROC AUC of 0.8421150. The cross validated ROC AUC was 0.8803419, lower than both models 2 and 3. 
+
+For all four models, based on the density plots, model 3 tends to perform the best in terms of predictive power in predicting output cases of 1, that is: at risk of heart attack. A more powerful model is best at predicting 1s than 0s in this instance: it is more valuable to know you are at risk of heart attack than not for preventative measures to be put in place. Model 3 also contains the highest (tied) cross validated ROC AUC value. Model 3 appears to predict cases of heart attack the best; **Model 3 is the best KNN model**.
+
+#### Logistic Models' Density Graphs 
+
+![Logistic Model 1](Logit_Model1.png)
+
+![Logistic Model 2](Logit_Model2.png)
+
+![Logistic Model 3](Logit_Model3.png)
+
+![Logistic Model 4](Logit_Model4.png)
+
+
+### Q4: ROC Curve
+
+#### KNN ROC Curve
+
+```{r, KNN ROC Curve}
+#Model 3
+autoplot(roc_curve(test_predictions,output,.pred_0))
+```
+
+#### Logistic Regression ROC Curve
+
+```{r, Logistic Regression ROC Curve}
+#Model 3
+autoplot(roc_curve(logit_test_predictions,output,x))
+```
+
+# Part Two: Metrics
+
+#### KNN Models
+
+Metric              | Model 1  | Model 2  | Model 3  | Model 4
+--------------------| -------- | -------- |----------|---------
+Sensitivity         |0.5641026 |0.6153846 |0.6410256 |0.6153846 
+Pos Predictive Value|0.88      |0.8275862 |0.8333333 |0.8275862
+Specificity         |0.9       |0.8333333 |0.8333333 |0.8333333
+
+#### Logistic Models
+
+Metric              | Model 1  | Model 2  | Model 3  | Model 4
+--------------------| -------- | -------- |----------|---------
+Sensitivity         |0.8461538 |0.8205128 |0.8461538 |0.7948718 
+Pos Predictive Value|0.8684211 |0.8421053 |0.8684211 |0.8275862
+Specificity         |0.8333333 |0.8       |0.8333333 |0.8333333
+
+```{r include=FALSE}
+#KNN Model 1
+knn_rec <- recipe(output~age+sex+cp+trtbps+chol+restecg+thalach,data=myData) %>%
+  step_dummy(sex,cp,restecg) %>%
+  step_normalize(age,trtbps,chol,thalach)
+
+#KNN Model 2
+knn_rec <- recipe(output~sex+cp+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(thalach,trtbps)
+
+#KNN Model 3
+knn_rec <- recipe(output~sex+chol+cp+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(chol,thalach,trtbps)
+
+#KNN Model 4
+knn_rec <- recipe(output~sex+cp+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(thalach)
+
+knn_wflow <- workflow() %>%
+  add_recipe(knn_rec) %>%
+  add_model(knn_mod_tune)
+
+myData_cv <- vfold_cv(myData, v = 10)
+
+knn_grid_search <-
+  tune_grid(knn_wflow,
+    resamples = myData_cv,
+    grid = k_grid
+  )
+knn_grid_search %>% collect_metrics()
+
+knn_final <- knn_grid_search %>%
+  select_best(metric="roc_auc")
+knn_final
+
+knn_wflow <- knn_wflow %>%
+  finalize_workflow(knn_final)
+
+knn_fit <- knn_wflow %>%
+  last_fit(myData_split)
+knn_fit
+
+test_performance <- knn_fit %>% collect_metrics()
+test_performance
+
+test_predictions <- knn_fit %>% collect_predictions()
+test_predictions
+
+test_predictions %>% 
+  conf_mat(truth = output, estimate = .pred_class)
+```
+
+```{r}
+#KNN 1 Metrics
+KNN_Sens1 <- 22/(22+17)
+KNN_Sens1
+KNN_PPV1 <- 22/(22+3)
+KNN_PPV1
+KNN_Spec1 <- 27/(27+3)
+KNN_Spec1
+
+# KNN 2 Metrics
+KNN_Sens2 <- 24/(24+15)
+KNN_Sens2
+KNN_PPV2 <- 24/(24+5)
+KNN_PPV2
+KNN_Spec2 <- 25/(25+5)
+KNN_Spec2
+
+# KNN 3 Metrics
+KNN_Sens3 <- 25/(25+14)
+KNN_Sens3
+KNN_PPV3 <- 25/(25+5)
+KNN_PPV3
+KNN_Spec3 <- 25/(25+5)
+KNN_Spec3
+
+# KNN 4 Metrics
+KNN_Sens4 <- 24/(24+15)
+KNN_Sens4
+KNN_PPV4 <- 24/(24+5)
+KNN_PPV4
+KNN_Spec4 <- 25/(25+5)
+KNN_Spec4
+```
+
+```{r include=FALSE}
+logitmod <- logistic_reg() %>%
+  set_mode("classification")%>%
+  set_engine("glm")
+
+#Model 1
+logit_rec <- recipe(output~age+sex+cp+trtbps+chol+restecg+thalach,data=myData) %>%
+  step_dummy(sex,cp,restecg) %>%
+  step_normalize(age,trtbps,chol,thalach)
+
+#Model 2
+logit_rec <- recipe(output~sex+cp+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(trtbps,thalach)
+
+#Model 3
+logit_rec <- recipe(output~sex+cp+chol+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(trtbps,chol,thalach)
+
+#Model 4
+logit_rec <- recipe(output~sex+cp+chol+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(chol,thalach)
+
+logit_wflow <- workflow() %>%
+  add_recipe(logit_rec) %>%
+  add_model(logitmod)
+
+myData_cv <- vfold_cv(myData, v = 10)
+
+logit_grid_search <-
+  tune_grid(logit_wflow,
+    resamples = myData_cv
+  )
+logit_grid_search %>% collect_metrics()
+
+logit_final <- logit_grid_search %>%
+  select_best(metric="roc_auc")
+logit_final
+
+logit_wflow <- logit_wflow %>%
+  finalize_workflow(logit_wflow)
+
+logit_fit <- logit_wflow %>%
+  last_fit(myData_split)
+logit_fit
+
+test_performance <- logit_fit %>% collect_metrics()
+test_performance
+
+logit_test_predictions <- logit_fit %>% collect_predictions()
+logit_test_predictions
+
+logit_test_predictions %>% 
+  conf_mat(truth = output, estimate = .pred_class)
+```
+
+```{r}
+#Logit 1 Metrics
+Logit_Sens1 <- 33/(33+6)
+Logit_Sens1
+Logit_PPV1 <- 33/(33+5)
+Logit_PPV1
+Logit_Spec1 <- 25/(25+5)
+Logit_Spec1
+
+#Logit 2 Metrics
+Logit_Sens2 <- 32/(32+7)
+Logit_Sens2
+Logit_PPV2 <- 32/(32+6)
+Logit_PPV2
+Logit_Spec2 <- 24/(24+6)
+Logit_Spec2
+
+#Logit 3 Metrics
+Logit_Sens3 <- 33/(33+6)
+Logit_Sens3
+Logit_PPV3 <- 33/(33+5)
+Logit_PPV3
+Logit_Spec3 <- 25/(25+5)
+Logit_Spec3
+
+#Logit 4 Metrics
+Logit_Sens4 <- 31/(31+8)
+Logit_Sens4
+Logit_PPV4 <- 31/(31+6)
+Logit_PPV4
+Logit_Spec4 <- 24/(24+6)
+Logit_Spec4
+```
+
+# Part Three: Discussion
+
+### Q1: The hospital faces severe lawsuits if they deem a patient to be low risk, and that patient later experiences a heart attack.
+
+**Metric**: We would want to look at **sensitivity** rates for answering this question. This is because we want to minimize the instances of false negatives, that is: minimizing the instances where a patient is deemed low risk and later on experiences a heart attack.
+
+**Model**: Based on sensitivity scores alone, the logistic models all score higher than KNN models. Logistic Models 1 and 3, specifically, have identical sensitivity scores. However, looking at their respective density graphs, Model 3 seems to be a better predictor of heart-attack risk patients. Therefore, we would want to use **Logistic Model 3**.
+
+**Score**: Logistic Model 3 has a sensitivity score of 0.8205128, and we should expect future observations to have a similar sensitivity score.
+
+
+### Q2: The hospital is overfull, and wants to only use bed space for patients most in need of monitoring due to heart attack risk.
+
+**Metric**: We would want to look at **specificity** for answering this question. This is because we would like to identify people who are known not to be at risk for a heart attack (true negatives) and, at the same time, not categorizing some people as being at risk for a heart attack when they are not at risk (avoiding false positives). This way, bed space will not be taken up by those who are falsely identified as being at risk, and patients can be narrowed down to only those who are in true need of a hospital bed.
+
+**Model**: Based on specificity scores alone, KNN Model #1 scores the highest. Therefore, we would want to use **KNN Model 1** to answer this question.
+
+**Score**: KNN Model 1 has a specificity score of .90, and we should expect future observations to have a similar specificity score.
+
+### Q3: The hospital is studying root causes of heart attacks, and would like to understand which biological measures are associated with heart attack risk.
+
+**Metric**: Since this question pertains to labels of risk (irregardless of if risk turns into future heart attack), we would want to look at **positive predictive values** for answering this question.
+
+**Model**: KNN Model 1 and Logistic Model 1 are the only models that include both demographic predictors, age and sex. As such, comparisons for this question will be limited to these two models. KNN Model has the higher positive predictive value.Therefore, we would want to use **KNN Model 1** to answer this question.
+
+**Score**: KNN Model 1 has a positive predictive value score of .88, and we should expect future observations to have a similar positive predictive value score.
+
+### Q4: The hospital is training a new batch of doctors, and they would like to compare the diagnoses of these doctors to the predictions given by the algorithm to measure the ability of new doctors to diagnose patients.
+
+**Metric**: This question is requiring the accuracy of identifying a true outcome, whether positive (patient is at risk of heart attack) or negative (patient is not at risk for heart attack). As such, **positive predictive value** or **negative predictive value (not calculated here)** should be used. Positive predictive values represent all those who truly are at risk of heart attack out of all of those who may or may not be at risk of a heart attack. PPV also considers not misclassifying (avoiding false positives) those who are not at risk for a heart attack as being at risk.
+
+**Model**: KNN Model 1 and Logistic Model 1 are the only models that include both demographic predictors, age and sex. As such, comparisons for this question will be limited to these two models. KNN Model has the higher positive predictive value.Therefore, we would want to use **KNN Model 1** to answer this question.
+
+**Score**: KNN Model 1 has a positive predictive value score of .88, and we should expect future observations to have a similar positive predictive value score.
+
+# Part Four: Validation
+
+```{r warning=FALSE, include=FALSE}
+validation <- read_csv("https://www.dropbox.com/s/jkwqdiyx6o6oad0/heart_attack_validation.csv?dl=1")
+
+validation$sex <- as.factor(validation$sex)
+validation$cp <- as.factor(validation$cp)
+validation$restecg <- as.factor(validation$restecg)
+validation$output <- as.factor(validation$output)
+
+str(validation)
+```
+
+
+Citation Key: 
+  
+  * KNN M3 P1 = KNN Model 3 from Part 1
+  
+  * KNN M3 P4 = KNN Model 3 from Part 4
+  
+  * LR M3 P1 = Logistic Regression Model 3 from Part 1
+  
+  * LR M3 P4 = Logistic Regression Model 3 from Part 4
+  
+  
+Metric              | KNN M3 P1| KNN M3 P4| LR M3 P1 | LR M3 P4
+--------------------| -------- | -------- |----------|---------
+ROC AUC             |0.8538462 |0.8755981 |0.8940171 |0.8899522 
+Pos Predictive Value|0.8333333 |0.8823529 |0.8684211 |0.8235294
+Sensitivity         |0.6410256 |0.7894737 |0.8461538 |0.7368421  
+
+Looking at the values of ROC AUC, Positive Predictive Value (precision), and Sensitivity (recall) compared to the cross-validated estimates reported in Part One and Part Two, the measures of model success turn out to be approximately correct for the validation data. In fact, for the KNN model, each of the metrics improved on the validation dataset. For the logistic regression, each of the metrics decreased. However, the decrease was minimal and can still be perceived as approximately correct. 
+
+```{r include=FALSE}
+#KNN Model 3 removing age,restecg
+knn_rec <- recipe(output~sex+chol+cp+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(chol,thalach,trtbps)
+
+knn_wflow <- workflow() %>%
+    add_recipe(knn_rec) %>%
+    add_model(knn_mod_tune)
+
+myData_cv <- vfold_cv(myData, v = 10)
+knn_grid_search <- tune_grid(knn_wflow,resamples = myData_cv,grid = k_grid)
+knn_grid_search %>% collect_metrics()
+knn_final <- knn_grid_search %>%
+  select_best(metric="roc_auc")
+knn_final
+
+knn_wflow <- knn_wflow %>%
+    finalize_workflow(knn_final)
+knn_fit <- knn_wflow %>%
+  last_fit(myData_split)
+knn_fit
+
+test_performance <- knn_fit %>% collect_metrics()
+test_performance
+
+test_predictions <- knn_fit %>% collect_predictions()
+test_predictions
+
+test_predictions %>% 
+  conf_mat(truth = output, estimate = .pred_class)
+final_model <- fit(knn_wflow, myData)
+final_model
+```
+
+```{r, KNN 3 Validation}
+# Validation Predictions
+predictions_class <- final_model %>%
+  predict(new_data = validation) %>%
+  bind_cols(validation %>% select(output))
+
+predictions <- final_model %>%
+  predict(validation, type = "prob") %>%
+  bind_cols(predictions_class)
+
+# KNN Model 3 Confusion Matrix
+predictions %>%
+  conf_mat(output,.pred_class)
+
+KNNPPV_valid <- 15/(15+2)
+KNNPPV_valid
+
+KNNSens_valid <- 15/(15+4)
+KNNSens_valid
+# KNN Model 3 ROC AUC
+predictions %>%
+  roc_auc(output, .pred_0)
+```
+
+```{r include=FALSE}
+#Model 3
+logit_rec <- recipe(output~sex+cp+chol+trtbps+thalach,data=myData) %>%
+  step_dummy(sex,cp) %>%
+  step_normalize(trtbps,chol,thalach)
+
+logit_wflow <- workflow() %>%
+  add_recipe(logit_rec) %>%
+  add_model(logitmod)
+
+myData_cv <- vfold_cv(myData, v = 10)
+
+logit_grid_search <-
+  tune_grid(logit_wflow,
+    resamples = myData_cv
+  )
+logit_grid_search %>% collect_metrics()
+
+logit_final <- logit_grid_search %>%
+  select_best(metric="roc_auc")
+logit_final
+
+logit_wflow <- logit_wflow %>%
+  finalize_workflow(logit_wflow)
+
+logit_fit <- logit_wflow %>%
+  last_fit(myData_split)
+logit_fit
+
+test_performance <- logit_fit %>% collect_metrics()
+test_performance
+
+logit_test_predictions <- logit_fit %>% collect_predictions()
+logit_test_predictions
+
+logit_test_predictions %>% 
+  conf_mat(truth = output, estimate = .pred_class)
+
+logit_final_model <- fit(logit_wflow, myData)
+logit_final_model
+```
+
+```{r, Logit 3 Validation}
+# Validation Predictions
+predictions_class <- logit_final_model %>%
+  predict(new_data = validation) %>%
+  bind_cols(validation %>% select(output))
+
+predictions <- logit_final_model %>%
+  predict(validation, type = "prob") %>%
+  bind_cols(predictions_class)
+
+# Logit Model 3 Confusion Matrix
+predictions %>%
+  conf_mat(output,.pred_class)
+
+LRPPV_valid <- 14/(14+3)
+LRPPV_valid
+
+LRSens_valid <- 14/(14+5)
+LRSens_valid
+# Logit Model 3 ROC AUC
+predictions %>%
+  roc_auc(output, .pred_0)
+
+```
+

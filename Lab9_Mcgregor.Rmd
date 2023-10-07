@@ -1,0 +1,807 @@
+---
+title: 'Lab #9: Neural Networks'
+author: "Jen McGregor"
+date: "12/1/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE)
+library(tidyverse)
+library(tidymodels)
+library(rpart.plot)
+library(discrim)
+library(baguette)
+library(janitor)
+library(readr)
+set.seed(1)
+```
+
+# Dataset 1: Mushrooms
+
+**The first data set  concerns mushrooms that grow in the wild. An expert mushroom forager can identify the species by its appearance, and determine if the mushroom is edible or poisonous.**
+
+```{r, load in the data}
+myData <- read_csv("https://www.dropbox.com/s/jk5q3dq1u63ey1e/mushrooms.csv?dl=1",col_types = str_c(rep("c", 23), collapse = ""))
+
+myData <- myData %>% rename(
+  cap_shape=`cap-shape`, 
+  cap_surface=`cap-surface`,
+  cap_color=`cap-color`,
+  gill_attachment=`gill-attachment`,
+  gill_spacing=`gill-spacing`,
+  gill_size=`gill-size`,
+  gill_color=`gill-color`,
+  stalk_shape=`stalk-shape`,
+  stalk_root=`stalk-root`,
+  stalk_surface_above_ring=`stalk-surface-above-ring`,
+  stalk_surface_below_ring=`stalk-surface-below-ring`,
+  stalk_color_above_ring=`stalk-color-above-ring`,
+  stalk_color_below_ring=`stalk-color-below-ring`,
+  veil_type=`veil-type`,
+  veil_color=`veil-color`,
+  ring_number=`ring-number`,
+  ring_type=`ring-type`,
+  spore_print_color=`spore-print-color`)
+
+
+#remove veil type as it is factor type with 1 level (all are p's)
+myData <- myData[,-17]
+
+
+myData[sapply(myData, is.character)] <- lapply(myData[sapply(myData, is.character)],as.factor)
+```
+
+```{r}
+set.seed(1)
+shrooms_cvs <- vfold_cv(myData, v = 5)
+```
+
+### Part One: A perfect tree
+
+**Fit a single decision tree to the full mushroom data, and plot the resulting tree. You should find that almost all mushrooms are perfectly classified; that is, the resulting leaf nodes are very close to 100% pure. Based on the tree that results, suggest a “nature guide” that tells people which mushrooms are safe to eat and which aren’t.**
+
+###### Nature Guide
+
+  Beware of mushrooms! Be cautious of 4 factors: the mushroom odor, the spore print color, if the root is club (C) or rooted (R), and if an odor is anise or not. 
+    
+    * IF the mushroom has an odor, DO NOT EAT IT. 
+    
+    * IF the mushroom does NOT have an odor AND is green, DO NOT EAT IT. 
+    
+    * IF the mushroom does NOT have an odor AND is any color BUT green, it is likely SAFE to eat!
+    
+```{r}
+tree_recipe <- recipe(class ~ ., data = myData) %>%
+  step_dummy(all_nominal(),-class)
+```
+
+```{r}
+tree_mod <- decision_tree() %>%
+  set_engine("rpart") %>%
+  set_mode("classification")
+
+tree_wflow <- workflow() %>%
+  add_recipe(tree_recipe) %>%
+  add_model(tree_mod)
+
+tree_fit <- tree_wflow %>%
+  fit(myData)
+
+mushrooms_pred <- myData %>% 
+        select(class) %>%
+  bind_cols(
+    predict(tree_fit, myData),
+    predict(tree_fit, myData, type = "prob")
+  )
+
+mushrooms_pred %>%
+  accuracy(estimate = .pred_class,
+           truth = class)
+```
+
+**Plot**
+
+```{r}
+tree_fitted <- tree_fit %>%
+  pull_workflow_fit()
+
+rpart.plot(tree_fitted$fit)
+```
+
+### Part Two: … or is it?
+
+**Apply each of the following re-sampling and/or ensemble techniques to this classification problem.**
+
+### Q1: Cross-validation
+
+The cross-validated accuracy is slightly higher than fitting the data to the entire data set. Therefore, the classification rules we learned in Part One probably apply to all mushrooms. 
+
+```{r include=FALSE}
+tree_mod <- decision_tree() %>%
+  set_engine("rpart") %>%
+  set_mode("classification")
+
+tree_recipe <- recipe(class ~ ., data = myData) %>%
+  step_dummy(all_nominal(),-class)
+
+tree_wflow <- workflow() %>%
+  add_recipe(tree_recipe) %>%
+  add_model(tree_mod)
+```
+
+```{r}
+set.seed(1)
+tree_fit <- tree_wflow %>%
+  fit_resamples(shrooms_cvs)
+
+tree_fit %>% collect_metrics()
+```
+
+### Q2: Bagging
+
+The bagging accuracy is slightly higher than fitting the data to the entire data set. Therefore, the classification rules we learned in Part One probably apply to all mushrooms.
+
+```{r}
+set.seed(1)
+splits <- myData %>% 
+  initial_split(0.5, strata = class)
+
+training <- splits %>% training()
+testing <- splits %>% testing()
+
+tree_recipe <- recipe(class ~ ., data = training) %>%
+  step_dummy(all_nominal(),-class)
+```
+
+```{r}
+options(scipen=999)
+set.seed(1)
+
+bagging_mod <- bag_tree() %>%
+  set_engine("rpart",times=25) %>%
+  set_mode("classification")
+
+tree_wflow <- workflow() %>%
+  add_recipe(tree_recipe) %>%
+  add_model(bagging_mod)
+
+bag_tree_fit <- tree_wflow %>%
+  fit(training)
+
+mushrooms_pred <- testing %>% 
+        select(class) %>%
+  bind_cols(
+    predict(bag_tree_fit, testing),
+    predict(bag_tree_fit, testing, type = "prob")
+  )
+
+mushrooms_pred %>%
+  accuracy(estimate = .pred_class,
+           truth = class)
+```
+
+### Q3: Random forests
+
+The random forest accuracy is slightly higher than fitting the data to the entire data set. Therefore, the classification rules we learned in Part One probably apply to all mushrooms.
+
+```{r}
+forest_mod <- rand_forest(mtry = tune(), trees = 1000, min_n = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+tree_recipe <- recipe(class ~ ., data = myData) %>%
+  step_dummy(all_nominal(),-class)
+
+forest_wflow <- workflow() %>%
+  add_recipe(tree_recipe) %>%
+  add_model(forest_mod)
+
+forest_res <-
+  tune_grid(
+    forest_wflow,
+    resamples = shrooms_cvs,
+    grid = 11
+  )
+
+bestacc <- forest_res %>% 
+  show_best(metric = "accuracy")
+
+bestacc
+
+last_forest_mod <- rand_forest(mtry = 8, trees = 1000, min_n = 35) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+last_forest_wflow <- forest_wflow %>%
+  update_model(last_forest_mod)
+
+set.seed(1)
+
+last_rf_fit <- last_forest_wflow %>%
+  last_fit(splits)
+
+last_rf_fit %>%
+  collect_metrics()
+```
+
+
+### Q4: Neural Networks
+
+The Neural Networks accuracy is slightly higher than fitting the data to the entire data set. Therefore, the classification rules we learned in Part One probably apply to all mushrooms.
+
+```{r}
+nn_grid <- grid_regular(
+  hidden_units(),
+  penalty(),
+  epochs(),
+  levels = 3
+)
+
+nn_mod <- mlp(
+  hidden_units = tune(),
+  penalty = tune(),
+  epochs = tune(),
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+nn_wflow <- workflow() %>%
+  add_recipe(tree_recipe) %>%
+  add_model(nn_mod)
+
+nn_grid_search <-
+  tune_grid(
+    nn_wflow,
+    resamples = shrooms_cvs,
+    grid = nn_grid
+  )
+
+bestacc <- nn_grid_search %>% 
+  show_best(metric = "accuracy")
+
+bestacc
+
+last_nn_mod <- mlp(
+  hidden_units = 5,
+  penalty = 0.0000100000,
+  epochs = 505,
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+last_nn_wflow <- nn_wflow %>%
+  update_model(last_nn_mod)
+
+set.seed(1)
+
+last_nn_fit <- last_nn_wflow %>%
+  last_fit(splits)
+
+last_nn_fit %>%
+  collect_metrics()
+```
+
+### Part Three: Logistic Regression
+
+**Fit a logistic regression, including only the predictors that you deem most important based on your work in Parts One and Two. Interpret the results: which features of a mushroom are most indicative of poison ness?**
+
+The predictors I chose were the ones deemed most important by the decision tree in Part 1: Odor, Spore Print Color, and Stalk Root as well as predictors high on the list of importance from bagging: gill size and gill spacing. Using these predictors, I found none to be statistically significant. When running a logistic regression on all predictors, none appeared to be statistically significant. On both occasions, the p-values were about 1. P values close to 1 suggests no difference between the groups other than due to chance.
+
+```{r}
+tree_recipe <- recipe(class ~ odor +spore_print_color+stalk_root+gill_size+gill_spacing,data = myData) %>%
+  step_dummy(all_nominal(),-class)
+
+lr_mod <- logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+
+lr_wflow <- workflow() %>%
+  add_model(lr_mod) %>%
+  add_recipe(tree_recipe) 
+
+lr_wflow %>%
+  fit_resamples(shrooms_cvs) %>%
+  collect_metrics()
+
+lr_final <- lr_wflow %>% fit(myData)
+
+lr_preds <- predict(lr_final, myData)
+
+myData %>%
+  mutate(
+   preds = lr_preds$.pred_class 
+  ) %>%
+  count(preds, class)
+
+lr_fit <- lr_final %>% pull_workflow_fit()
+
+lr_fit$fit %>% summary()
+```
+
+# Dataset 2: Telecom Customers
+
+**The Sales division of the company wants to understand how customer demographics - such as their age, income, marital status, employment status, etc - impact the customer’s behavior. They have identified four different types of customers, and labeled a dataset of existing customers with these categories.**
+
+```{r}
+myData <- read_csv("https://www.dropbox.com/s/9dymy30v394ud8h/Telecust1.csv?dl=1")
+```
+
+```{r include=FALSE}
+myData$region <- as.factor(myData$region)
+myData$marital <- as.factor(myData$marital)
+myData$ed <- as.factor(myData$ed)
+myData$retire <- as.factor(myData$retire)
+myData$gender <- as.factor(myData$gender)
+myData$custcat <- as.factor(myData$custcat)
+myData$reside <- as.factor(myData$reside)
+
+str(myData)
+```
+
+**Deliverables**
+  
+  **1. A model that can be used to predict what category a new customer who signs up will likely fall into.**
+  
+The Logistic Model using the predictors: tenure+age+ed+income+region is the most optimal model to predict what category a new customer who signs up will likely fall into.
+  
+```{r include=FALSE}
+tester <- glm(custcat~., family=binomial,data=myData)
+summary(tester)
+```
+
+```{r, setting up cross validation and recipe}
+cv <- vfold_cv(myData, v = 5)
+
+recipe <- recipe(custcat ~ tenure+age+ed+income+region, data = myData) %>%
+  step_normalize(all_numeric()) %>%
+  step_dummy(all_nominal(), -custcat)
+```
+
+```{r,KNN,include=FALSE}
+knn_mod <- nearest_neighbor(neighbors = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+k_grid <- grid_regular(neighbors(c(2, 40)), levels = 10)
+
+knn_wflow <- workflow() %>%
+  add_model(knn_mod) %>%
+  add_recipe(recipe) 
+
+knn_wflow %>%
+  tune_grid(
+    grid = k_grid,
+    resamples = cv
+  ) %>%
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  arrange(desc(mean))
+
+#The best accuracy was found to be around K = 40, with accuracy value of 0.377
+```
+
+```{r include=FALSE}
+knn_mod_final <- nearest_neighbor(neighbors = 40) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+knn_wflow <- workflow() %>%
+  add_model(knn_mod_final) %>%
+  add_recipe(recipe) 
+
+knn_final <- knn_wflow %>% fit(myData)
+
+knn_preds <- predict(knn_final, myData)
+
+myData %>%
+  mutate(
+   preds = knn_preds$.pred_class 
+  ) %>%
+  count(preds, custcat)
+```
+
+```{r,Logistic}
+lr_mod <- multinom_reg() %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+lr_wflow <- workflow() %>%
+  add_model(lr_mod) %>%
+  add_recipe(recipe) 
+
+lr_wflow %>%
+  fit_resamples(cv) %>%
+  collect_metrics()
+
+lr_final <- lr_wflow %>% fit(myData)
+
+lr_preds <- predict(lr_final, myData)
+
+myData %>%
+  mutate(
+   preds = lr_preds$.pred_class 
+  ) %>%
+  count(preds, custcat)
+```
+
+```{r,ignore this,eval=FALSE, include=FALSE}
+bind_cols(
+  predict(lr_final, myData),
+  predict(lr_final, myData, type = "prob")
+)
+```
+
+```{r include=FALSE}
+set.seed(1)
+splits <- myData %>% 
+  initial_split(0.5, strata = custcat)
+
+training <- splits %>% training()
+testing <- splits %>% testing()
+```
+
+```{r,Bagging, include=FALSE}
+options(scipen=999)
+set.seed(1)
+
+bagging_mod <- bag_tree() %>%
+  set_engine("rpart",times=25) %>%
+  set_mode("classification")
+
+bagging_wflow <- workflow() %>%
+  add_recipe(recipe) %>%
+  add_model(bagging_mod)
+
+bag_tree_fit <- bagging_wflow %>%
+  fit(training)
+
+bag_pred <- testing %>% 
+        select(custcat) %>%
+  bind_cols(
+    predict(bag_tree_fit, testing),
+    predict(bag_tree_fit, testing, type = "prob")
+  )
+
+bag_pred %>%
+  accuracy(estimate = .pred_class,
+           truth = custcat)
+```
+
+```{r, Random Forest, include=FALSE}
+forest_mod <- rand_forest(mtry = tune(), trees = 1000, min_n = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+forest_wflow <- workflow() %>%
+  add_recipe(recipe) %>%
+  add_model(forest_mod)
+
+forest_res <-
+  tune_grid(
+    forest_wflow,
+    resamples = cv,
+    grid = 11
+  )
+
+bestacc <- forest_res %>% 
+  show_best(metric = "accuracy")
+bestacc
+
+#The best accuracy was found to be around mtry=1,min_n=2 with accuracy value of 0.392
+
+last_forest_mod <- rand_forest(mtry = 1, trees = 1000, min_n = 2) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+last_forest_wflow <- forest_wflow %>%
+  update_model(last_forest_mod)
+
+set.seed(1)
+
+last_rf_fit <- last_forest_wflow %>%
+  last_fit(splits)
+
+last_rf_fit %>%
+  collect_metrics()
+```
+
+```{r include=FALSE}
+nn_grid <- grid_regular(
+  hidden_units(),
+  penalty(),
+  epochs(),
+  levels = 3
+)
+
+nn_mod <- mlp(
+  hidden_units = tune(),
+  penalty = tune(),
+  epochs = tune(),
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+nn_wflow <- workflow() %>%
+  add_recipe(recipe) %>%
+  add_model(nn_mod)
+
+nn_grid_search <-
+  tune_grid(
+    nn_wflow,
+    resamples = cv,
+    grid = nn_grid
+  )
+
+bestacc <- nn_grid_search %>% 
+  show_best(metric = "accuracy")
+bestacc
+
+#The best accuracy was found to be around hidden_units=10,penalty=1,epochs=505 with accuracy value of 0.404
+
+last_nn_mod <- mlp(
+  hidden_units = 10,
+  penalty = 1,
+  epochs = 505,
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+last_nn_wflow <- nn_wflow %>%
+  update_model(last_nn_mod)
+
+set.seed(1)
+
+last_nn_fit <- last_nn_wflow %>%
+  last_fit(splits)
+
+last_nn_fit %>%
+  collect_metrics()
+```
+
+
+  **2. Insight into what demographics are associated with these customer differences.**
+
+In running a test of individual significance, as well as running models of multiple explanatory combinations, the demographics most associated with customer differences are as follows: tenure, age, ed, income, and region.
+
+### Part Four: Report to Your Manager
+
+Metric   | KNN   | Logistic | Bagging  | Random Forest|Neural Networks
+---------| ------| -------- |----------|--------------|---------------
+Accuracy |0.377  | 0.3900000|0.3333333 | 0.3792415    | 0.4071856
+
+To arrive at the best model for making predictions of customer categories, I first rand a standard logistic regression outside of the tidy models framework to determine individual significance. Using a significance level of 5%, I determined that the tenure, and ed variables were both statistically significant. Age and reside were almost significant as well; holding p values of 0.061433 and 0.054180, respectively. After running a few models with these predictors (only), I felt as though a different explanatory variable combination would produce a higher accuracy than the rates I was getting. As such, I re-evaluated the variables just listed. Simpler models generally are better in future predictions than more complex ones; the goal here is to not overfit that data set provided by management. 
+
+The 'reside' variable in particular was of concern. The dataset provided little context as to its meaning. Did the values 1-6 pertain to years at a residence or did those values correlate to categories of residences (labeled 1-6)? In initial data wrangling (found above in part 3), the 'reside' variable was converted into a factor, certainly affecting analysis. However, this was not an assured variable structure. As such, I decided to remove it from the recipe. In doing so, I was able to arrive at a higher accuracy across all machine learning structures. 
+
+The table above provides a comparison in accuracy across the different machine learning structures. Logistic and Neural Networks performed the best in terms of accuracy. You'll find in the report that logistic was selected as the optimal model for future predictions despite having a slightly lower accuracy score than neural networks. I decided to recommend this due to logistic regression's easier interpret-ability and less computational power required. 
+
+```{r, inspect for individual significance2}
+tester <- glm(custcat~., family=binomial,data=myData)
+summary(tester)
+```
+
+```{r,KNN2}
+knn_mod <- nearest_neighbor(neighbors = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+k_grid <- grid_regular(neighbors(c(2, 40)), levels = 10)
+
+knn_wflow <- workflow() %>%
+  add_model(knn_mod) %>%
+  add_recipe(recipe) 
+
+knn_wflow %>%
+  tune_grid(
+    grid = k_grid,
+    resamples = cv
+  ) %>%
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  arrange(desc(mean))
+
+#The best accuracy was found to be around K = 40, with accuracy value of 0.377
+```
+
+```{r,KNN2 final mod}
+knn_mod_final <- nearest_neighbor(neighbors = 40) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+knn_wflow <- workflow() %>%
+  add_model(knn_mod_final) %>%
+  add_recipe(recipe) 
+
+knn_final <- knn_wflow %>% fit(myData)
+
+knn_preds <- predict(knn_final, myData)
+
+KNN_table <- myData %>%
+  mutate(
+   preds = knn_preds$.pred_class 
+  ) %>%
+  count(preds, custcat)
+KNN_table
+
+#Predicting A
+KNN_table$n[1]/sum(sum(KNN_table$n[c(2:4)])+KNN_table$n[1])
+
+#Predicting B
+KNN_table$n[6]/sum(sum(KNN_table$n[c(5,7:8)])+KNN_table$n[6])
+
+#Predicting C
+KNN_table$n[11]/sum(sum(KNN_table$n[c(9:10,12)])+KNN_table$n[11])
+
+#Predicting D
+KNN_table$n[16]/sum(sum(KNN_table$n[c(13:15)])+KNN_table$n[16])
+```
+
+```{r,Logistic2}
+lr_mod <- multinom_reg() %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+lr_wflow <- workflow() %>%
+  add_model(lr_mod) %>%
+  add_recipe(recipe) 
+
+lr_wflow %>%
+  fit_resamples(cv) %>%
+  collect_metrics()
+
+lr_final <- lr_wflow %>% fit(myData)
+
+lr_preds <- predict(lr_final, myData)
+
+myData %>%
+  mutate(
+   preds = lr_preds$.pred_class 
+  ) %>%
+  count(preds, custcat)
+```
+
+```{r}
+bind_cols(
+  predict(lr_final, myData),
+  predict(lr_final, myData, type = "prob")
+)
+```
+
+```{r,Bagging set up splits2}
+set.seed(1)
+splits <- myData %>% 
+  initial_split(0.5, strata = custcat)
+
+training <- splits %>% training()
+testing <- splits %>% testing()
+```
+
+```{r,Bagging2}
+options(scipen=999)
+set.seed(1)
+
+bagging_mod <- bag_tree() %>%
+  set_engine("rpart",times=25) %>%
+  set_mode("classification")
+
+bagging_wflow <- workflow() %>%
+  add_recipe(recipe) %>%
+  add_model(bagging_mod)
+
+bag_tree_fit <- bagging_wflow %>%
+  fit(training)
+
+bag_pred <- testing %>% 
+        select(custcat) %>%
+  bind_cols(
+    predict(bag_tree_fit, testing),
+    predict(bag_tree_fit, testing, type = "prob")
+  )
+
+bag_pred %>%
+  accuracy(estimate = .pred_class,
+           truth = custcat)
+```
+
+```{r,random forest2}
+forest_mod <- rand_forest(mtry = tune(), trees = 1000, min_n = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+forest_wflow <- workflow() %>%
+  add_recipe(recipe) %>%
+  add_model(forest_mod)
+
+forest_res <-
+  tune_grid(
+    forest_wflow,
+    resamples = cv,
+    grid = 11
+  )
+
+bestacc <- forest_res %>% 
+  show_best(metric = "accuracy")
+bestacc
+
+#The best accuracy was found to be around mtry=1,min_n=2 with accuracy value of 0.392
+
+last_forest_mod <- rand_forest(mtry = 1, trees = 1000, min_n = 2) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+last_forest_wflow <- forest_wflow %>%
+  update_model(last_forest_mod)
+
+set.seed(1)
+
+last_rf_fit <- last_forest_wflow %>%
+  last_fit(splits)
+
+last_rf_fit %>%
+  collect_metrics()
+```
+
+```{r,neural networks2}
+nn_grid <- grid_regular(
+  hidden_units(),
+  penalty(),
+  epochs(),
+  levels = 3
+)
+
+nn_mod <- mlp(
+  hidden_units = tune(),
+  penalty = tune(),
+  epochs = tune(),
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+nn_wflow <- workflow() %>%
+  add_recipe(recipe) %>%
+  add_model(nn_mod)
+
+nn_grid_search <-
+  tune_grid(
+    nn_wflow,
+    resamples = cv,
+    grid = nn_grid
+  )
+
+bestacc <- nn_grid_search %>% 
+  show_best(metric = "accuracy")
+bestacc
+
+#The best accuracy was found to be around hidden_units=10,penalty=1,epochs=505 with accuracy value of 0.404
+
+last_nn_mod <- mlp(
+  hidden_units = 10,
+  penalty = 1,
+  epochs = 505,
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+last_nn_wflow <- nn_wflow %>%
+  update_model(last_nn_mod)
+
+set.seed(1)
+
+last_nn_fit <- last_nn_wflow %>%
+  last_fit(splits)
+
+last_nn_fit %>%
+  collect_metrics()
+```
+
+
