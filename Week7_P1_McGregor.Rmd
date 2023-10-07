@@ -1,0 +1,268 @@
+---
+title: "Week 7 Practice #1"
+author: "Jen McGregor"
+date: "11/1/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ISLR)
+library(tidyverse)
+library(car)
+```
+
+# Problem 1
+
+**In 1983 an article was published about ladybird beetles and their behavior changes under different temperature conditions (N. H. Copp. Animal Behavior, 31,:424-430). An experiment was run to see how many beetles stayed in light as temperature changed.**
+
+#### 1. Read in the LadyBugs.csv data file into R.
+
+```{r}
+ladybugs <- read.csv("LadyBugs.csv")
+```
+
+#### 2. Plot lighted (y) vs. temperature (x) to explore the data.
+
+```{r}
+plot(ladybugs$Temp,ladybugs$Lighted)
+```
+
+
+#### 3. Describe the relationship you see. Is a straight line model going to fit these data well?
+
+A straight line model will not fit these data well. There are at least 3 critical points in which the points begin to fall in a different direction of slope. For example at temperature = 10, the amounts of beetles staying under the light goes from increasing to decreasing. This changes again at temperature = 30, where the amounts of beetles stating under the light returns to increasing from decreasing. 
+
+#### 4. Fit three polynomial regression models (of order at least 2, but you choose) to these data.
+
+```{r}
+model1 <- lm(Lighted~poly(Temp,2),data=ladybugs)
+model2 <- lm(Lighted~poly(Temp,3),data=ladybugs)
+model3 <- lm(Lighted~poly(Temp,4),data=ladybugs)
+```
+
+#### 5. Plot all of your models from (4) on top of the data in a new graph.
+
+```{r}
+ladybugs <- data.frame(ladybugs, model1$fitted.values,model2$fitted.values,model3$fitted.values)
+colnames(ladybugs)[3] <- "Model1"
+colnames(ladybugs)[4] <- "Model2"
+colnames(ladybugs)[5] <- "Model3"
+
+ladybugs %>%
+  pivot_longer(Model1:Model3, names_to="Model",values_to="Values") %>%
+  ggplot(aes(x=Temp,y=Lighted))+
+  geom_point()+
+  geom_line(aes(x=Temp,y=Values,color=Model))
+```
+
+#### 6. From the graph alone, which model do you think is best and why?
+
+From the graph alone, the line based on the fitted values from the third model with a polynomial containing Temp^4 (Model 3) appears to be the best. It visually captures most of the changes in direction in the data set. However, considering over fitting, Model 3 may not ultimately be the best selection because it may capture the quirks of this ladybug data set too much instead of working well with future models. 
+
+#### 7. How do your models compare with respect to R-squared and Adjusted R-Squared?
+
+
+Measure  | Model 1| Model 2  | Model 3
+---------| ------ | -------- | --------
+R^2      | 0.6009 |  0.7526  |  **0.7811**
+Adj. R^2 | 0.5814 |  0.7341  |  **0.7587**
+
+```{r}
+summary(model1)
+summary(model2)
+summary(model3)
+```
+
+#### 8. Interpret the R2 value for your best model and produce one final plot with just your best model on top of the data.
+
+Based on the values in the table above, model 3 (uses Temp^4 as a predictor) had the highest R2 and Adjusted R2 values and thus can be determined as the best model given the 3 options. The R2 value of 0.7811 means that our model explains 78.11% of the variance in the response variable. 
+
+```{r}
+ladybugs %>%
+  ggplot(aes(x=Temp,y=Lighted))+
+  geom_point()+
+  geom_line(aes(x=Temp,y=Model3),color="blue")
+```
+
+#### 9. Suppose you split these data into a training set (on which to train your model) and a test set (on which to test your model). Explain what you think would happen to the value of the training error as you increase the degree of the polynomial model fit to the data? What about the value of the test error? Be sure to explain your reasoning.
+
+If I were to increase the degree of the polynomial model, I would anticipate that the errors of the training set would decrease, but would increase on the test set. Although the polynomial model with a higher degree results in a better model for the ladybugs dataset provided, I think the higher (4) degree model fits the quirks of the ladybug dataset too much. As such, it would not fit the test dataset as well, resulting in a higher error value. 
+
+# Problem 2
+
+**This exercise uses the ISLR’s Carseats data set, which contains information about car seat sales in 400 stores. You can load this dataset into R by simply running library(ISLR) after having installed the package.**
+
+#### 1. Fit a multiple regression model to predict Sales using Price, Urban, and US. Report the coefficient estimates.
+
+Intercept| Price   | UrbanYes | USYes
+---------| ------  | -------- | --------
+13.0435  | -0.0545 |-0.0219   | 1.2006 
+
+```{r}
+modelcars <- lm(Sales~Price+Urban+US,data=Carseats)
+summary(modelcars)
+round(coefficients(modelcars),digits=4)
+```
+
+#### 2. Provide an interpretation of each coefficient in the model.
+
+**Intercept**: The average predicted sales of car seats is 13.04 units when the store selling car seats is not in an urban location nor in the United States, and the car seat is priced at 0 dollars.
+
+**Price**: On average, car seat sales decrease by 0.05 units when price increases by 1 dollar.
+
+**Urban**: On average, car seat sales decrease by 0.02 units when the store selling car seats is in an urban location.
+
+**US**: On average, car seat sales increase by 1.20 units when the store selling car seats is in the United States,.
+
+#### 3. Write out the model in equation form.
+
+$$
+ \hat{Sales}=13.0435-0.0545_{Price}-0.0219_{Urban}+1.2006_{US}
+$$
+
+#### 4. Is at least one predictor useful in predicting Sales? Be sure to cite the information you’re using to decide.
+
+In order to determine if at least one predictor useful in predicting Sales, I used a global F test. After outlining the test hypotheses, and looking at the model summary (both found below), I found the p-value to be < 2.2e-16. With an assumed 5% significance level to verify this argument, I can reject the null hypothesis and can conclude that at least one predictor is useful in predicting sales.
+
+$$
+H_0: \beta_{Price}=\beta_{Urban}=\beta_{US}=0
+\\
+H_A: at\ least\ one\ \beta \neq 0
+$$
+```{r}
+summary(modelcars)
+```
+
+#### 5. For which predictors can you reject the null hypothesis H0:βj=0? Cite the information you’re using to answer.
+
+With the Price and US predictors, we can reject the null hypothesis H0:βj=0 and can conclude that both Price and US are significant in explaining car seat sales. This was determined using a 5% significance level. The p-values and full decisions are outlined below. P-values were taken directly from the summary table. 
+
+$$
+1.
+\\
+H_0: \beta_{Price}=0
+\\
+H_A: \beta_{Price} \neq 0
+$$
+$$
+2.
+\\
+H_0: \beta_{Urban}=0
+\\
+H_A: \beta_{Urban} \neq 0
+$$
+
+$$
+3.
+\\
+H_0: \beta_{US}=0
+\\
+H_A: \beta_{US} \neq 0
+$$
+
+
+  metric | **Price** | Urban            | **US**
+---------| ------    | ---------------- | --------
+Decision | Reject H0 | Fail to Reject H0| Reject H0 
+p-value  |< 2e-16    |     0.936        | 4.86e-06
+
+```{r}
+summary(modelcars)
+```
+
+
+#### 6. Were all of the conditions for inference satisfied for your tests in (5)? Include whatever you used (graphs, etc.) to decide.
+
+```{r}
+par(mfrow=c(2,2))
+plot(modelcars, which=1:3)
+```
+
+1. **L**inearity
+
+Looking at the first plot (Residuals vs Fitted), the graph shows a vaguely horizontal line, demonstrating a linear relationship. The assumption passes.
+
+2. **I**ndependence (of the errors)
+
+The Durbin Watson tests if model errors are autocorrelated with themselves. The null states that they are NOT autocorrelated (the assumption passes). Since the p-value is 0.36, with an assumed significance value of 0.05,the errors are independent. The assumption passes. 
+
+```{r}
+durbinWatsonTest(modelcars)
+```
+
+3. **N**ormality (of the errors)
+
+Looking at the second plot (Normal Q-Q), normal errors are shown if the model's line follows the dashed line on the plot. In this case, the model's line does follow the dashed line on the plot, so this assumption passes.
+
+4. **E**qual Variance (of the errors)
+
+Looking at the third plot (Scale-Location), equal variance is shown by equal spread of the points. The plot shows an equal spread of the points; it shows homoscedasticity. The assumption passes. 
+
+#### 7. On the basis of your response to (5), fit a smaller model that only uses the predictors for which there is evidence of an association with the outcome. Report the coefficient estimates.
+
+Intercept| Price   | US
+---------| ------  | -------- 
+13.0308  | -0.0545 |1.1996  
+
+```{r}
+modelcars2 <- lm(Sales~Price+US,data=Carseats)
+summary(modelcars2)
+round(coefficients(modelcars2),digits=4)
+```
+
+#### 8. How well do the models in (1) and (7) fit the data? Cite the information you used to determine this.
+
+The models seem to fit the data similarly, but the second model (blue line) seems to fit the data the best based on the plot below.
+
+```{r}
+Carseats <- data.frame(Carseats,modelcars$fitted.values,modelcars2$fitted.values)
+colnames(Carseats)[12] <- "Model 1"
+colnames(Carseats)[13] <- "Model 2"
+
+
+Carseats <- Carseats %>%
+  pivot_longer(
+    `Model 1`:`Model 2`,
+    names_to = "Model",
+    values_to = "Value") %>%
+  ggplot(aes(x=Price,y=Sales))+
+  geom_point()+
+  geom_line(aes(x=Price,y=Value,color=Model))
+Carseats
+```
+
+#### 9. Is there evidence of outliers or high leverage observations in the best model from (8)? Cite the information you used to assess this.
+
+**Outliers**: Using the Residuals versus Leverage plot below, there are no outliers since none of the standardized residuals exceed 3 standard deviations. 
+
+**High Leverage Observations**: A data point has high leverage, if it has extreme predictor x values. A leverage statistic above 2(p + 1)/n reflects an observation with high leverage. In this example, a leverage statistic above 0.015 represents an observation with high leverage. In looking at the plot below, there are quite a few high leverage points as their leverage statistics exceed 0.015. 
+
+p= 2 (number of predictors in the model)
+n = 400 (number of observations)
+
+```{r}
+plot(modelcars2, 5)
+leverage_stat <- 6/400
+leverage_stat
+```
+
+#### 10. How did your different models compare with respect to R-squared and Adjusted R-squared? Does this comparison match the conclusions you already came to?
+
+The models do not differ much in R^2 values but do differ slightly in their adjusted R^2 values. Model 2 (which omits the Urban variable) has a slightly larger R^2 value than Model 1 (which contains the Urban variable). This comparison match the conclusions you already came to above: Model 2 fits the data better than Model 1. 
+
+```{r}
+summary(modelcars)
+summary(modelcars2)
+```
+
+Measure  | Model 1| Model 2    |
+---------| ------ | -----------| 
+R^2      | 0.2393 |  0.2393    | 
+Adj. R^2 | 0.2335 |  **0.2354**| 
+
+
+

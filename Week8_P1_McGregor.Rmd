@@ -1,0 +1,215 @@
+---
+title: "Week8_P1_McGregor"
+author: "Jen McGregor"
+date: "11/8/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE)
+library(tidyverse)
+library(tidymodels)
+library(ISLR)
+library(caret)
+```
+
+# Problem #1
+
+**This exercise uses the book’s Auto data set, which contains gas mileage, horsepower, and other information for cars. You will develop a model to predict whether a given car gets high or low gas mileage based on the other variables.**
+
+### 1. Create a binary variable, mpg01, that contains a 1 if mpg contains a value above its median, and a 0 if mpg contains a value below its median. Note you may find it helpful to use the data.frame() function to create a single data set containing both mpg01 and the other Auto variables.
+
+```{r}
+Auto <- data.frame(Auto)
+Auto$mpg01 <- ifelse(Auto$mpg>median(Auto$mpg),1,0)
+```
+
+### 2. Explore the data graphically in order to investigate the association between mpg01 and the other features. Which of the other features seem most likely to be useful in predicting mpg01? Scatterplots and boxplots may be useful tools to answer this question. Describe your findings.
+
+As evidenced by the below plots, Weight and Horsepower may be features that are useful in predicting MPG01. As car weight increases, the tendency for mpg to be greater than its median (22.5) decreases. Similarly, as horsepower increases, he tendency for mpg to be greater than its median (22.5) decreases.
+
+```{r}
+Auto %>%
+ggplot(aes(x=weight, y=mpg01))+
+  geom_point()+
+  geom_smooth(method="glm", se=FALSE, fullrange=TRUE, 
+              method.args = list(family=binomial))
+
+Auto%>%
+  ggplot(aes(x=horsepower, y=mpg01))+
+  geom_point()+
+  geom_smooth(method="glm", se=FALSE, fullrange=TRUE, 
+              method.args = list(family=binomial))
+```
+
+### 3. Split the data into a training set and a test set.
+
+```{r}
+Auto$mpg01 <- as.factor(Auto$mpg01)
+set.seed(1)
+auto_split <- Auto %>%
+  initial_split()
+auto_test <- auto_split%>%
+  testing()
+auto_train <- auto_split%>%
+  training()
+```
+
+### 4. Perform logistic regression on the training data in order to predict mpg01 using the variables that seemed most associated with mpg01 in (2). What is the test error of the model obtained? Produce a confusion matrix as well.
+
+The test error of model 1 (using weight and horsepower as predictors) is 0.8877551.
+
+```{r}
+logisticmodel1 <- glm(mpg01~weight+horsepower, family=binomial, data=auto_train)
+summary(logisticmodel1)
+```
+
+```{r}
+logitmod <- logistic_reg() %>%
+  set_mode("classification")%>%
+  set_engine("glm")
+
+recipe1 <- recipe(mpg01~weight+horsepower,data=auto_train) %>%
+  step_normalize(all_numeric())
+workflow1 <- workflow()%>%
+  add_recipe(recipe1)%>%
+  add_model(logitmod)
+fit1 <- workflow1 %>%
+  fit(auto_train)
+fit1 %>% pull_workflow_fit()
+
+pred1 <- fit1%>% predict(auto_test)
+
+auto_test <- auto_test%>%
+  mutate(preds1=pred1$.pred_class)
+auto_test %>% count(preds1,mpg01)
+
+auto_test %>%
+  accuracy(truth=mpg01,
+           estimate=preds1)
+```
+
+### 5. If you were unsure about the variables you chose to include for (4), fit two more models with different sets of variables. Perform cross-validation all three of these models and compare their test error estimates. Which one was best? How clear was it? Does this make sense?
+
+Metric        | Model 2  | Model 3  |
+------------  | -------- | -------- |
+Accuracy Rate |0.8673469 |0.6938776 |
+
+The test error of model 1 (using weight and horsepower as predictors) is 0.8877551, and remains the highest out of the three models. Clearly horsepower and weight are better predictors of mpg01 than cylinders, displacement, acceleration, and year. 
+
+```{r}
+logisticmodel2 <- glm(mpg01~cylinders+displacement, family=binomial, data=auto_test)
+summary(logisticmodel2)
+logisticmodel3 <- glm(mpg01~acceleration+year, family=binomial, data=auto_test)
+summary(logisticmodel3)
+```
+
+```{r}
+recipe2 <- recipe(mpg01~cylinders+displacement,data=auto_train) %>%
+  step_normalize(all_numeric())
+workflow2 <- workflow()%>%
+  add_recipe(recipe2)%>%
+  add_model(logitmod)
+fit2 <- workflow2 %>%
+  fit(auto_train)
+fit2 %>% pull_workflow_fit()
+
+pred2 <- fit2%>% predict(auto_test)
+
+auto_test2 <- auto_test%>%
+  mutate(preds2=pred2$.pred_class)
+auto_test2 %>% count(preds2,mpg01)
+
+auto_test2 %>%
+  accuracy(truth=mpg01,
+           estimate=preds2)
+```
+
+```{r}
+recipe3 <- recipe(mpg01~acceleration+year,data=auto_train) %>%
+  step_normalize(all_numeric())
+workflow3 <- workflow()%>%
+  add_recipe(recipe3)%>%
+  add_model(logitmod)
+fit3 <- workflow3 %>%
+  fit(auto_train)
+fit3 %>% pull_workflow_fit()
+
+pred3 <- fit3%>% predict(auto_test)
+
+auto_test3 <- auto_test%>%
+  mutate(preds3=pred3$.pred_class)
+auto_test3 %>% count(preds3,mpg01)
+
+auto_test3 %>%
+  accuracy(truth=mpg01,
+           estimate=preds3)
+```
+
+
+### 6. How do your results and model comparisons change if you change the probability threshold? That is, if you changed the probability used to predict if a car has high gas mileage do your results change noticeably. Revise your use of the predict() function to output probabilities instead of classifications, and then do the classifications yourself using the following three different thresholds: .5 (default), .7, and .85.
+
+
+Threshold   | Model 1  | Model 2  | Model 3
+------------| -------- | -------- |---------
+.5          | 0.8878   |0.8878    |0.7245
+.7          | 0.8673   |0.8367    |0.6837
+.85         | 0.8571   |0.8673    |0.5816
+
+
+```{r}
+#0.5
+pred15 <- predict(logisticmodel1,auto_test,type="response")
+binary15 <- as.factor(round(pred15))
+
+pred25 <- predict(logisticmodel2,auto_test,type="response")
+binary25 <- as.factor(round(pred25))
+
+pred35 <- predict(logisticmodel3,auto_test,type="response")
+binary35 <- as.factor(round(pred35))
+
+#0.7
+pred17 <- predict(logisticmodel1,auto_test,type="response")
+binary17 <- as.factor(ifelse(pred17>=.7,1,0))
+
+pred27 <- predict(logisticmodel2,auto_test,type="response")
+binary27 <- as.factor(ifelse(pred27>=.7,1,0))
+
+pred37 <- predict(logisticmodel3,auto_test,type="response")
+binary37 <- as.factor(ifelse(pred37>=.7,1,0))
+
+
+#.85
+pred185 <- predict(logisticmodel1,auto_test,type="response")
+binary185 <- as.factor(ifelse(pred185>=.85,1,0))
+
+pred285 <- predict(logisticmodel2,auto_test,type="response")
+binary285 <- as.factor(ifelse(pred285>=.85,1,0))
+
+pred385 <- predict(logisticmodel3,auto_test,type="response")
+binary385 <- as.factor(ifelse(pred385>=.85,1,0))
+```
+
+### Create confusion matrices and/or accuracies (or errors) for each, and compare the models again.
+
+```{r}
+#.5
+set.seed(1)
+confusionMatrix(binary15,auto_test$mpg01)
+confusionMatrix(binary25,auto_test$mpg01)
+confusionMatrix(binary35,auto_test$mpg01)
+
+#.7
+confusionMatrix(binary17,auto_test$mpg01)
+confusionMatrix(binary27,auto_test$mpg01)
+confusionMatrix(binary37,auto_test$mpg01)
+
+#.85
+confusionMatrix(binary185,auto_test$mpg01)
+confusionMatrix(binary285,auto_test$mpg01)
+confusionMatrix(binary385,auto_test$mpg01)
+```
+

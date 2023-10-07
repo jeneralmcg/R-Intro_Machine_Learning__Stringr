@@ -1,0 +1,104 @@
+---
+title: 'Week 10 Practice #2: Neural Networks'
+author: "Jen McGregor"
+date: "12/1/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(keras)
+library(ISLR)
+```
+
+# Problem 1
+
+**This exercise uses the book’s Carseats data set, in which we are interested in predicting Sales.**
+
+```{r}
+myData <- Carseats
+```
+
+
+**1. Fit a neural network to the entire dataset. Report the cross-validated metrics.**
+
+```{r}
+set.seed(1)
+nn_recipe <- recipe(Sales~., 
+                     data = myData) %>%
+  step_dummy(ShelveLoc)%>%
+  step_dummy(Urban)%>%
+  step_dummy(US) %>%
+  step_normalize(all_numeric())
+
+set.seed(1)
+nn_cvs <- vfold_cv(myData, v = 5)
+
+nn_mod <- mlp(
+  hidden_units = 8,
+  penalty = .01,
+  epochs = 100,
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("regression")
+
+nn_wflow <- workflow() %>%
+  add_recipe(nn_recipe) %>%
+  add_model(nn_mod)
+
+nn_fit_1 <- nn_wflow %>%
+  fit_resamples(nn_cvs)
+
+nn_fit_1 %>% collect_metrics()
+```
+
+**2. Now, tune your neural network according to hidden_units and penalty to identify the best neural network model. Report the cross-validated metrics. Remember to consider the size of your dataset when specifying your model(s).**
+
+```{r}
+nn_grid <- grid_regular(
+  hidden_units(c(2, 12)),
+  penalty(c(-5, 0)),
+  levels = 3
+)
+
+nn_mod <- mlp(
+  hidden_units = tune(),
+  penalty = tune(),
+  epochs = 100,
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("regression")
+
+nn_wflow <- workflow() %>%
+  add_recipe(nn_recipe) %>%
+  add_model(nn_mod)
+
+nn_grid_search <-
+  tune_grid(
+    nn_wflow,
+    resamples = nn_cvs,
+    grid = nn_grid
+  )
+
+tuning_metrics <- nn_grid_search %>% collect_metrics() %>%
+  filter(.metric=="rmse") %>%
+  slice_min(mean)
+tuning_metrics
+```
+
+**3. Are more hidden units necessarily better?**
+
+In this example, increasing the amount of hidden units decreases the value of RMSE. Since smaller RMSE values are preferred, higher amounts of hidden units may be preferred. 
+
+
+**4. How do these results compare to your previous results using decision trees and random forests?**
+
+These results are both lower than our previous results using decision trees and random forests. 
+

@@ -1,0 +1,115 @@
+---
+title: "Week7_P2_McGregor"
+author: "Jen McGregor"
+date: "11/4/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(broom)
+library(caret)
+library(gains)
+library(pROC)
+```
+
+# Model Selection Activity
+
+**Let us return to the LadyBugs dataset from our previous activity. Recal, in 1983 an article was published about ladybird beetles and their behavior changes under different temperature conditions (N. H. Copp. Animal Behavior, 31,:424-430). An experiment was run to see how many beetles stayed in light as temperature changed.**
+
+## Problem 1
+
+### 1. Read in the LadyBugs.csv data file into R.
+
+```{r}
+ladybugs <- read.csv("LadyBugs.csv")
+```
+
+### 2. Fit three polynomial regression models (of order at least 2, but you choose) to these data.
+
+```{r}
+set.seed(190498)
+model2 <- lm(Lighted~poly(Temp,2),data=ladybugs)
+model3 <- lm(Lighted~poly(Temp,3),data=ladybugs)
+model4 <- lm(Lighted~poly(Temp,4),data=ladybugs)
+```
+
+### 3. Plot all of your models from (2) on top of the data in a new graph.
+
+```{r}
+ladybugs <- data.frame(ladybugs, model2$fitted.values,model3$fitted.values,model4$fitted.values)
+colnames(ladybugs)[3] <- "Model2"
+colnames(ladybugs)[4] <- "Model3"
+colnames(ladybugs)[5] <- "Model4"
+
+ladybugs %>%
+  pivot_longer(Model2:Model4, names_to="Model",values_to="Values") %>%
+  ggplot(aes(x=Temp,y=Lighted))+
+  geom_point()+
+  geom_line(aes(x=Temp,y=Values,color=Model))
+```
+
+### 4. Perform k-fold cross-validation with all three of your above models, using k = 5. For each, compute the cross-validation estimate of the test error and the R-squared value. Which model appears best and why?
+
+```{r}
+###### Cross Validation BE CAREFUL W VARIABLE NUMBER LABELS
+#k fold=5
+#k-1 training --> 4 training, 1 validation
+
+#44 in 5 (roughly)equal groups: 1-9,10-18,19-27,28-36,37-44
+
+# Experiment 1
+Training1 <- ladybugs[1:36,]
+Validation1 <- ladybugs[37:44,]
+
+# Experiment 2
+Training2 <- ladybugs[10:44,]
+Validation2 <- ladybugs[1:9,]
+
+# Experiment 3
+Training3 <- ladybugs[c(1:9,19:44),]
+Validation3 <- ladybugs[10:18,]
+
+# Experiment 4
+Training4 <- ladybugs[c(1:18, 28:44),]
+Validation4 <- ladybugs[19:27,]
+
+# Experiment 5
+Training5 <- ladybugs[c(1:27,37:44),]
+Validation5 <- ladybugs[28:36,]
+
+# Experiment 1 Models from Training Set
+model2_training1 <- lm(Lighted~poly(Temp,2),data=Training1)
+model3_training1 <- lm(Lighted~poly(Temp,3),data=Training1)
+model4_training1 <- lm(Lighted~poly(Temp,4),data=Training1)
+
+# Experiment 1 Predictions, Introduce Validation Set
+predictm2_ex1 <- predict(model2_training1,Validation1)
+predictm3_ex1 <- predict(model3_training1,Validation1)
+predictm4_ex1 <- predict(model4_training1,Validation1)
+
+# Experiment 1 RMSE
+sqrt(mean((Validation1$Temp-predictm2_ex1)^2))
+sqrt(mean((Validation1$Temp-predictm3_ex1)^2))
+sqrt(mean((Validation1$Temp-predictm4_ex1)^2))
+
+# Experiment 2 Models from Training Set
+model2_training2 <- lm(Lighted~poly(Temp,2),data=Training2)
+model3_training2 <- lm(Lighted~poly(Temp,3),data=Training2)
+model4_training2 <- lm(Lighted~poly(Temp,4),data=Training2)
+
+# Experiment 2 Predictions, Introduce Validation Set
+predictm2_ex2 <- predict(model2_training2,Validation2)
+predictm3_ex2 <- predict(model3_training2,Validation2)
+predictm4_ex2 <- predict(model4_training2,Validation2)
+
+# Experiment 2 RMSE
+sqrt(mean((Validation2$Temp-predictm2_ex2)^2))
+sqrt(mean((Validation2$Temp-predictm3_ex2)^2))
+sqrt(mean((Validation2$Temp-predictm4_ex2)^2))
+```

@@ -1,0 +1,169 @@
+---
+title: 'Week 10 Practice #1: Random Forests'
+author: "Jen McGregor"
+date: "11/29/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE,echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(readr)
+library(ISLR)
+library(rpart)
+library(rpart.plot)
+library(ranger)
+library(vip)
+set.seed(1)
+```
+
+# Problem 1
+
+**This exercise uses the book’s Carseats data set, in which we are interested in predicting Sales.**
+
+```{r}
+myData <- Carseats
+```
+
+**1. Fit a single decision tree to the entire dataset. Report the cross-validated metrics.**
+
+```{r}
+tree_mod <- decision_tree() %>%
+  set_engine("rpart") %>%
+  set_mode("regression")
+
+tree_recipe <- recipe(Sales ~ ., data = myData)
+
+tree_wflow <- workflow() %>%
+  add_recipe(tree_recipe) %>%
+  add_model(tree_mod)
+
+set.seed(1)
+cars_cvs <- vfold_cv(myData, v = 5)
+
+cars_fit <- tree_wflow %>%
+  fit_resamples(cars_cvs)
+
+cars_fit %>% collect_metrics()
+```
+
+**2. Now, tune your decision tree according to cost_complexity, tree_depth, and min_n to identify the best decision tree model. Report the cross-validated metrics. Plot the final tree and interpret the results.**
+
+```{r}
+options(scipen=999)
+tree_mod <- decision_tree(cost_complexity = tune(),
+                          tree_depth = tune(),
+                          min_n = tune()) %>%
+  set_engine("rpart") %>%
+  set_mode("regression")
+
+tree_grid <- grid_regular(cost_complexity(),tree_depth(),min_n(),
+                          levels=2)
+
+tree_wflow <- workflow() %>%
+  add_recipe(tree_recipe) %>%
+  add_model(tree_mod)
+
+tree_grid_search <-
+  tune_grid(
+    tree_wflow,
+    resamples = cars_cvs,
+    grid = tree_grid
+  )
+tuning_metrics <- tree_grid_search %>% collect_metrics() %>%
+  filter(.metric=="rmse") %>%
+  slice_min(mean)
+tuning_metrics
+```
+
+**Plot**
+
+```{r}
+tree_mod <- decision_tree(cost_complexity = 0.0000000001,
+                          tree_depth = 15,
+                          min_n = 40) %>%
+  set_engine("rpart") %>%
+  set_mode("regression")
+
+tree_wflow <- workflow() %>%
+  add_recipe(tree_recipe) %>%
+  add_model(tree_mod)
+
+tree_fit <- tree_wflow %>%
+  fit(myData)
+
+tree_fitted <- tree_fit %>%
+  pull_workflow_fit()
+
+rpart.plot(tree_fitted$fit)
+```
+
+
+**3. Determine the best random forest model for these data and report the cross-validated metrics. Is this model better or worse then the single decision tree?**
+
+This model is worse than the single decision tree, but the single decision tree overfits more than a random forest model does.
+
+```{r}
+forest_mod <- rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("regression")
+
+forest_wflow <- workflow() %>%
+  add_recipe(tree_recipe) %>%
+  add_model(forest_mod)
+
+set.seed(1)
+cars_cvs <- vfold_cv(myData, v = 5)
+
+forest_res <-
+  tune_grid(
+    forest_wflow,
+    resamples = cars_cvs,
+    grid = 25,
+    control = control_grid(save_pred = TRUE),
+            metrics = metric_set(rmse)
+  )
+
+forest_res %>% 
+  show_best(metric = "rmse")
+```
+
+**4. Install the vip package and checkout its usage here: https://www.tidymodels.org/start/case-study/#second-model. Even though random forests can be harder to interpret, we can still get variable importance scores out of the model results. Use the vip package to display variable importance scores for your final random forest model from (3). Do these scores align with your interpretations from (2) of the single decision tree.**
+
+In looking at the plot from our single decision tree, ShelveLoc and Price were placed towards the top of the decision tree (in the respective order), indicating higher importance. In the importance scores plotted below, ShelveLoc and Price are also in the top two importance, the only difference being that Price is ranked above importance instead of the other way around. As such, these scores align with your interpretations from (2) of the single decision tree . 
+
+```{r}
+forest_res %>% 
+  select_best(metric = "rmse")
+
+last_rf_mod <- 
+  rand_forest(mtry = 8, min_n = 4, trees = 768) %>% 
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("regression")
+
+last_rf_workflow <- 
+  forest_wflow %>% 
+  update_model(last_rf_mod)
+
+set.seed(1)
+splits <- initial_split(myData)
+
+set.seed(1)
+last_rf_fit <- 
+  last_rf_workflow %>% 
+  last_fit(splits)
+
+last_rf_fit %>% 
+  pluck(".workflow", 1) %>%   
+  pull_workflow_fit() %>% 
+  vip(num_features = 20)
+```
+
+
+**5. Explain what these variable importance scores represent as if you’re describing them to someone who is new to random forests.**
+
+Using a model called a Random Forest, we are trying to figure out what factors influence the predictability of car seat sales These factors can be anything from Price, to Advertising, to Shelf Location, among others. Looking at the plot above, Price and Shelf Location of the car seat influences the predictability of total car seat sales the most. 

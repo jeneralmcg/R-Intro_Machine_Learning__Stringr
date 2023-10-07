@@ -1,0 +1,163 @@
+---
+title: "Week 7 Practice #2"
+author: "Jen McGregor"
+date: "11/03/2021"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(broom)
+library(boot)
+```
+
+# Model Selection Activity
+
+**Let us return to the LadyBugs dataset from our previous activity. Recal, in 1983 an article was published about ladybird beetles and their behavior changes under different temperature conditions (N. H. Copp. Animal Behavior, 31,:424-430). An experiment was run to see how many beetles stayed in light as temperature changed.**
+
+## Problem 1
+
+### 1. Read in the LadyBugs.csv data file into R.
+
+```{r}
+ladybugs <- read.csv("LadyBugs.csv")
+```
+
+### 2. Fit three polynomial regression models (of order at least 2, but you choose) to these data.
+
+```{r}
+lr_mod <- linear_reg() %>%
+  set_mode("regression") %>%
+  set_engine("lm")
+
+poly_mod_2 <- lr_mod %>%
+  fit(Lighted ~ poly(Temp, 2), data = ladybugs)
+poly_mod_3 <- lr_mod %>%
+  fit(Lighted ~ poly(Temp, 3), data = ladybugs)
+poly_mod_4 <- lr_mod %>%
+  fit(Lighted ~ poly(Temp, 4), data = ladybugs)
+```
+
+### 3. Plot all of your models from (4) on top of the data in a new graph.
+
+```{r}
+ladybugs2 <- ladybugs %>%
+  mutate(
+    preds_2 = predict(poly_mod_2, 
+                       new_data = ladybugs, 
+                       type = "raw"),
+    preds_3 = predict(poly_mod_3, 
+                       new_data = ladybugs, 
+                       type = "raw"),
+    preds_4 = predict(poly_mod_4, 
+                       new_data = ladybugs, 
+                       type = "raw")
+  )
+ladybugs2<-ladybugs2 %>%
+  pivot_longer(preds_2:preds_4,
+    names_to="Model",
+    values_to="Values"
+  )
+
+ladybugs2 %>%
+  ggplot(aes(x=Temp,y=Lighted))+
+  geom_point()+
+  geom_line(aes(x=Temp,y=Values,color=Model))
+```
+
+### 4. Perform k-fold cross-validation with all of your above models, using k = 5. For each, compute the cross-validation estimate of the test error and the R-squared value. Which model appears best and why?
+
+Metric          | Poly2    | Poly3    | Poly4   |
+----------------| -------- | -------- | ------- |
+Test Error (MSE)|71.39735  |46.24678  |48.1033  |
+R^2             |0.6449753 |0.8139535 |0.807457 |
+  
+Given k-fold cross validation with the above models using k=5, the best model is the 2nd one ("Poly3", a degree 3 polynomial) due to its highest R squared value (0.8139535) and lowest MSE value (46.24678). 
+
+```{r}
+set.seed(1234)
+lb_cvs <- vfold_cv(ladybugs, v = 5)
+
+poly_2_cv <- lr_mod %>%
+  fit_resamples(Lighted ~ poly(Temp, 2),
+                resamples = lb_cvs)
+poly_3_cv <- lr_mod %>%
+  fit_resamples(Lighted ~ poly(Temp, 3),
+                resamples = lb_cvs)
+poly_4_cv <- lr_mod %>%
+  fit_resamples(Lighted ~ poly(Temp, 4),
+                resamples = lb_cvs)
+
+stats12 <- poly_2_cv %>% collect_metrics()
+stats13 <- poly_3_cv %>% collect_metrics()
+stats14 <- poly_4_cv %>% collect_metrics()
+
+#RSq
+stats12
+stats13
+stats14
+
+#MSE aka Test Error
+MSE12 <- (stats12$mean[1])^2
+MSE13 <- (stats13$mean[1])^2
+MSE14 <- (stats14$mean[1])^2
+
+MSE12
+MSE13
+MSE14
+```
+
+### 5. Repeat (4) for k = 10. Are your conclusions the same? How do the results for the different values of k compare to each other?
+
+Metric           | Poly2    | Poly3    | Poly4   |
+-----------------| -------- | -------- | ------- |
+Test Error (MSE) |68.4885   |46.6172   |45.36244 |
+     R^2         |0.6399396 |0.7607976 |0.7736456|
+
+
+Given k-fold cross validation with the above models using k=10, the best model is the third model ("Poly4", a degree 4 polynomial) due to its highest R squared value (0.7736456) and lowest MSE value (45.36244). This is a different conclusion than when k was set equal to 5. What does remain the same, however, is that the MSE/test error and R squared values are extremely close between Poly3 and Poly 4, both when k is set equal to 5 and when k is set equal to 10. 
+
+```{r}
+set.seed(1234)
+lb_cvs <- vfold_cv(ladybugs, v = 10)
+lb_cvs
+
+poly_2_cv <- lr_mod %>%
+  fit_resamples(Lighted ~ poly(Temp, 2),
+                resamples = lb_cvs)
+poly_3_cv <- lr_mod %>%
+  fit_resamples(Lighted ~ poly(Temp, 3),
+                resamples = lb_cvs)
+poly_4_cv <- lr_mod %>%
+  fit_resamples(Lighted ~ poly(Temp, 4),
+                resamples = lb_cvs)
+
+
+stats22 <- poly_2_cv %>% collect_metrics()
+stats23 <- poly_3_cv %>% collect_metrics()
+stats24 <- poly_4_cv %>% collect_metrics()
+
+#RSq
+stats22
+stats23
+stats24
+
+#MSE aka Test Error
+MSE22 <- (stats22$mean[1])^2
+MSE23 <- (stats23$mean[1])^2
+MSE24 <- (stats24$mean[1])^2
+
+MSE22
+MSE23
+MSE24
+```
+
+
+### 6. The smallest value of k (in cross-validation) is 2; the largest value is n. Explain the strengths and weaknesses of using smaller values of k versus larger values of k.
+
+In summary: **The lower the value of k, the smaller the variance and greater the the bias**. On the opposite side, **the higher the value of k, the greater the variance and smaller the bias.** Smaller values of k also work with faster computational speeds and are less costly than cross validation with larger values of k. To balance the bias variance trade-off, using values of k=5 or k=10 are popular.

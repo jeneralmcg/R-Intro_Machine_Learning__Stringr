@@ -1,0 +1,169 @@
+---
+title: "Week 9 Activity #2"
+author: "Jen McGregor"
+output:
+  prettydoc::html_pretty:
+  theme: hpstr
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+library(tidyverse)
+library(tidymodels)
+library(kknn)
+library(glmnet)
+library(discrim)
+library(kernlab)
+set.seed(1)
+```
+
+## Data Prep
+
+```{r include=FALSE}
+# Read data
+fed <- read.csv("https://www.dropbox.com/s/9t8sxr1sg0monih/federalist.txt?dl=1")
+
+# Data from papers with known authors
+fed_known <- fed %>%
+  select(-1) %>%
+  filter(Author != "DIS")
+```
+
+## Try it!
+
+#### Fit a KNN classifier using step_pca.  How does the accuracy compare to when you use all the original predictors?
+
+The KNN classifier using step_pca has a **higher** accuracy rate than a standard KNN classifier.
+
+#### A. KNN Classifier with step_pca
+```{r}
+knn_mod_tune <- nearest_neighbor(neighbors = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+```
+
+```{r}
+knn_rec1 <- recipe(Author~.,data=fed_known) %>%
+  step_normalize(all_numeric()) %>%
+  step_pca(all_numeric(),threshold = .60)
+
+knn_wflow <- workflow() %>%
+  add_recipe(knn_rec1) %>%
+  add_model(knn_mod_tune)
+
+set.seed(1)
+fed_known_cv <- vfold_cv(fed_known, v = 5, strata=Author)
+
+k_grid <- grid_regular(neighbors())
+
+knn_grid_search <-
+  tune_grid(
+    knn_wflow,
+    resamples = fed_known_cv,
+    grid = k_grid
+  )
+
+knn_grid_search %>% 
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  slice_max(mean)
+```
+#### B. Standard KNN Classifier
+
+```{r, not PCA}
+knn_rec2 <- recipe(Author~.,data=fed_known) %>%
+  step_normalize(all_numeric())
+
+knn_wflow <- workflow() %>%
+  add_recipe(knn_rec2) %>%
+  add_model(knn_mod_tune)
+
+set.seed(1)
+fed_known_cv <- vfold_cv(fed_known, v = 5,strata=Author)
+
+k_grid <- grid_regular(neighbors())
+
+knn_grid_search <-
+  tune_grid(
+    knn_wflow,
+    resamples = fed_known_cv,
+    grid = k_grid
+  )
+
+knn_grid_search %>% 
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  slice_max(mean)
+```
+
+
+## Try it!
+
+#### Fit a support vector classifier, tuning the **cost** parameter
+
+```{r}
+svm_rec <- recipe(Author~., data=fed_known) %>%
+  step_normalize(all_numeric())
+
+svm_mod1 <- svm_poly(cost = tune(), degree = 1) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+svm_grid <- grid_regular(cost())
+svm_grid
+
+svm_wflow <- workflow()%>%
+  add_recipe(svm_rec) %>%
+  add_model(svm_mod1)
+
+set.seed(1)
+fed_known_cv <- vfold_cv(fed_known, v = 5,strata=Author)
+
+svm_grid_search <-
+  tune_grid(
+    svm_wflow,
+    resamples = fed_known_cv,
+    grid = svm_grid
+  )
+
+svm_grid_search %>% 
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  slice_max(mean)
+```
+
+
+#### Fit a support vector **machine**, tuning the **cost** parameter AND the **degree** parameter.
+
+```{r}
+svm_rec <- recipe(Author~., data=fed_known) %>%
+  step_normalize(all_numeric())
+
+svm_mod2 <- svm_poly(cost = tune(), degree = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+svm_grid <- grid_regular(cost(),degree())
+svm_grid
+
+svm_wflow <- workflow()%>%
+  add_recipe(svm_rec) %>%
+  add_model(svm_mod2)
+
+set.seed(1)
+fed_known_cv <- vfold_cv(fed_known, v = 5,strata=Author)
+
+svm_grid_search <-
+  tune_grid(
+    svm_wflow,
+    resamples = fed_known_cv,
+    grid = svm_grid
+  )
+
+svm_grid_search %>% 
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  slice_max(mean)
+```
+
